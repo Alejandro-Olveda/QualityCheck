@@ -1,7 +1,19 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import relationship
+
 from database import Base
+
 
 class Usuario(Base):
     __tablename__ = "usuarios"
@@ -13,123 +25,312 @@ class Usuario(Base):
     activo = Column(Boolean, default=True)
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
 
-    #relaciones
-    roles = relationship("usuarioRol", back_populates="usuario")
+    roles = relationship(
+        "usuarioRol",
+        back_populates="usuario",
+        cascade="all, delete-orphan",
+    )
+
 
 class rol(Base):
     __tablename__ = "roles"
 
-    id_rol = Column (Integer, primary_key=True, index=True)
+    id_rol = Column(Integer, primary_key=True, index=True)
     nombre_rol = Column(String(50), nullable=False, unique=True)
-    descripcion = Column(String(255), nullable=True)
+    descripcion = Column(String(255))
 
-    #relaciones
-    usuarios = relationship("usuarioRol", back_populates="rol")
+    usuarios = relationship(
+        "usuarioRol",
+        back_populates="rol",
+        cascade="all, delete-orphan",
+    )
+
 
 class usuarioRol(Base):
     __tablename__ = "usuario_roles"
 
     id_usuario_rol = Column(Integer, primary_key=True, index=True)
-    id_usuario = Column(Integer, ForeignKey("usuarios.id_usuario"), nullable=False)
-    id_rol = Column(Integer, ForeignKey("roles.id_rol"), nullable=False)
+    id_usuario = Column(
+        Integer,
+        ForeignKey("usuarios.id_usuario"),
+        nullable=False,
+    )
+    id_rol = Column(
+        Integer,
+        ForeignKey("roles.id_rol"),
+        nullable=False,
+    )
 
-    #relaciones
-    usuario = relationship("Usuario")
-    rol = relationship("rol")
+    usuario = relationship("Usuario", back_populates="roles")
+    rol = relationship("rol", back_populates="usuarios")
+
 
 class Area(Base):
     __tablename__ = "areas"
 
     id_area = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(100), nullable=False, unique=True)
-    descripcion = Column(String(255), nullable=True)
+    descripcion = Column(String(255))
     activa = Column(Boolean, default=True)
 
-    # Relación con máquinas
     maquinas = relationship("Maquina", back_populates="area_rel")
+
 
 class Maquina(Base):
     __tablename__ = "maquinas"
 
     id_maquina = Column(Integer, primary_key=True, index=True)
-    id_area = Column(Integer, ForeignKey("areas.id_area"), nullable=False)
-    codigo_maquina = Column(String(20), unique=True, nullable=False, index=True) # Ej: MAQ-001
-    nombre = Column(String(150), nullable=False) # Ej: Torno CNC 03
-    tipo = Column(String(100), nullable=False)   # Ej: Torno CNC
-    marca = Column(String(100))                  # Ej: Haas
-    modelo = Column(String(100))                 # Ej: ST-20
+    id_area = Column(
+        Integer,
+        ForeignKey("areas.id_area"),
+        nullable=False,
+    )
+    codigo_maquina = Column(
+        String(20),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    nombre = Column(String(150), nullable=False)
+    tipo = Column(String(100), nullable=False)
+    marca = Column(String(100))
+    modelo = Column(String(100))
     numero_serie = Column(String(100), unique=True)
-    ubicacion = Column(String(150), nullable=True)              # Ej: Línea 2
-    estado = Column(String(50), default="Operativa", index=True) # Operativa, En revisión, Fuera de servicio
+    ubicacion = Column(String(150))
+    estado = Column(String(50), default="Operativa", index=True)
     activa = Column(Boolean, default=True)
 
-#Vinculación con la tabla Area
     area_rel = relationship("Area", back_populates="maquinas")
-
-    #Criterios específicos asignados a esta máquina
-    criterios = relationship("CriterioInspeccion", back_populates="maquina")
-
+    criterios = relationship(
+        "CriterioInspeccion",
+        back_populates="maquina",
+    )
 
 
 class CriterioInspeccion(Base):
     __tablename__ = "criterios_inspeccion"
 
     id_criterio = Column(Integer, primary_key=True, index=True)
-    id_maquina = Column(Integer, ForeignKey("maquinas.id_maquina"), nullable=False)
-    categoria = Column(String(100), nullable=False) #como: Seguridad, Calidad, Mantenimiento
+    id_maquina = Column(
+        Integer,
+        ForeignKey("maquinas.id_maquina"),
+        nullable=False,
+    )
+    categoria = Column(String(100), nullable=False)
     nombre_criterio = Column(String(150), nullable=False)
-    description = Column(String, nullable=True)
+
+    description = Column(Text)
     activo = Column(Boolean, default=True)
 
-    #relaciones
-    maquina = relationship("Maquina", back_populates="criterios")
+    maquina = relationship(
+        "Maquina",
+        back_populates="criterios",
+    )
 
 
 class Inspeccion(Base):
     __tablename__ = "revisiones"
 
     id_inspeccion = Column(Integer, primary_key=True, index=True)
-    codigo_inspeccion = Column(String(20), unique=True, nullable=False) # Ej: INS-00001
-    id_maquina = Column(Integer, ForeignKey("maquinas.id_maquina"), nullable=False)
-    id_inspector = Column(Integer, ForeignKey("usuarios.id_usuario"), nullable=False)
-    tipo_inspeccion = Column(String(50), nullable=False) # Preventiva, Correctiva, Rutina
+    codigo_inspeccion = Column(
+        String(50),
+        unique=True,
+        nullable=False,
+    )
+    id_maquina = Column(
+        Integer,
+        ForeignKey("maquinas.id_maquina"),
+        nullable=False,
+    )
+    id_inspector = Column(
+        Integer,
+        ForeignKey("usuarios.id_usuario"),
+        nullable=False,
+    )
+    tipo_inspeccion = Column(String(50), nullable=False)
     fecha_inspeccion = Column(DateTime, default=datetime.utcnow)
-    resultado_final = Column(String(50)) # Aprobada, Requiere atención, No aprobada
+    resultado_final = Column(String(50))
     observaciones_generales = Column(String(500))
 
-    #relaciones con tablas padre
+    estado_revision = Column(
+        String(30),
+        nullable=False,
+        default="Abierta",
+    )
+
+    id_revision_origen = Column(
+        Integer,
+        ForeignKey("revisiones.id_inspeccion"),
+        nullable=True,
+    )
+
     maquina = relationship("Maquina")
     inspector = relationship("Usuario")
 
-    #relaciones con tablas hijo
-    hallazgos = relationship("Hallazgo", back_populates="inspeccion")
+    hallazgos = relationship(
+        "Hallazgo",
+        back_populates="inspeccion",
+    )
 
+    revision_origen = relationship(
+        "Inspeccion",
+        remote_side=[id_inspeccion],
+        foreign_keys=[id_revision_origen],
+    )
 
 
 class Hallazgo(Base):
     __tablename__ = "hallazgos"
 
     id_hallazgo = Column(Integer, primary_key=True, index=True)
-    id_inspeccion = Column(Integer, ForeignKey("revisiones.id_inspeccion"), nullable=False)
-    id_criterio = Column(Integer, ForeignKey("criterios_inspeccion.id_criterio"), nullable=False)
-    nivel_severidad = Column(String(50), nullable=False) # Bajo, Medio, Alt
+    id_inspeccion = Column(
+        Integer,
+        ForeignKey("revisiones.id_inspeccion"),
+        nullable=False,
+    )
+    id_criterio = Column(
+        Integer,
+        ForeignKey("criterios_inspeccion.id_criterio"),
+        nullable=False,
+    )
+    nivel_severidad = Column(String(50), nullable=False)
     descripcion = Column(String(500), nullable=False)
-    estado = Column(String(50), default="Abierto") # Abierto, En proceso, Cerrado
+    estado = Column(String(50), default="Abierto")
 
-    #relaciones
-    inspeccion = relationship("Inspeccion", back_populates="hallazgos")
-    acciones = relationship("AccionCorrectiva", back_populates="hallazgo")
+    inspeccion = relationship(
+        "Inspeccion",
+        back_populates="hallazgos",
+    )
+    criterio = relationship("CriterioInspeccion")
+    acciones = relationship(
+        "AccionCorrectiva",
+        back_populates="hallazgo",
+    )
+
 
 class AccionCorrectiva(Base):
     __tablename__ = "acciones_correctivas"
 
     id_accion = Column(Integer, primary_key=True, index=True)
-    id_hallazgo = Column(Integer, ForeignKey("hallazgos.id_hallazgo"), nullable=False)
-    descripcion_accion= Column(String(500), nullable=False)
-    responsable= Column(String(150), nullable=False)
-    fecha_compromiso= Column(DateTime, nullable=False)
-    completada= Column(Boolean, default=False)
+    id_hallazgo = Column(
+        Integer,
+        ForeignKey("hallazgos.id_hallazgo"),
+        nullable=False,
+    )
 
-    #relaciones
-    hallazgo = relationship("Hallazgo", back_populates="acciones")
+    descripcion_accion = Column(String(500), nullable=False)
+    responsable = Column(String(150), nullable=False)
 
+    fecha_compromiso = Column(DateTime, nullable=False)
+    completada = Column(Boolean, default=False)
+
+    id_responsable = Column(
+        Integer,
+        ForeignKey("usuarios.id_usuario"),
+        nullable=True,
+    )
+
+    id_asignado_por = Column(
+        Integer,
+        ForeignKey("usuarios.id_usuario"),
+        nullable=True,
+    )
+
+    estado = Column(
+        String(30),
+        nullable=False,
+        default="Asignada",
+    )
+
+    fecha_realizada = Column(DateTime)
+    observaciones_tecnico = Column(Text)
+
+
+    id_verificador = Column(
+        Integer,
+        ForeignKey("usuarios.id_usuario"),
+        nullable=True,
+    )
+    fecha_verificacion = Column(DateTime)
+    observaciones_verificacion = Column(Text)
+
+    hallazgo = relationship(
+        "Hallazgo",
+        back_populates="acciones",
+    )
+    tecnico = relationship(
+        "Usuario",
+        foreign_keys=[id_responsable],
+    )
+    asignado_por = relationship(
+        "Usuario",
+        foreign_keys=[id_asignado_por],
+    )
+    verificador = relationship(
+        "Usuario",
+        foreign_keys=[id_verificador],
+    )
+
+
+class ResultadoInspeccion(Base):
+    __tablename__ = "resultados_inspeccion"
+
+    id_resultado = Column(Integer, primary_key=True)
+    id_inspeccion = Column(
+        Integer,
+        ForeignKey("revisiones.id_inspeccion"),
+        nullable=False,
+    )
+    id_criterio = Column(
+        Integer,
+        ForeignKey("criterios_inspeccion.id_criterio"),
+        nullable=False,
+    )
+    valor_medido = Column(String(150))
+    valor_esperado = Column(String(150))
+    cumple = Column(Boolean, nullable=False)
+    observacion = Column(Text)
+
+    inspeccion = relationship("Inspeccion")
+    criterio = relationship("CriterioInspeccion")
+
+
+class RevisionProgramada(Base):
+    __tablename__ = "revisiones_programadas"
+
+    id_programacion = Column(Integer, primary_key=True)
+    id_maquina = Column(
+        Integer,
+        ForeignKey("maquinas.id_maquina"),
+        nullable=False,
+    )
+    id_responsable = Column(
+        Integer,
+        ForeignKey("usuarios.id_usuario"),
+        nullable=False,
+    )
+    fecha_programada = Column(Date, nullable=False)
+    descripcion = Column(Text, nullable=False)
+    estado = Column(
+        String(30),
+        nullable=False,
+        default="Programada",
+    )
+    observaciones = Column(Text)
+
+    id_inspeccion = Column(
+        Integer,
+        ForeignKey("revisiones.id_inspeccion"),
+        unique=True,
+        nullable=True,
+    )
+
+    creado_en = Column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    maquina = relationship("Maquina")
+    responsable = relationship("Usuario")
+    inspeccion = relationship("Inspeccion")

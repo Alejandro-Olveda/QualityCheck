@@ -1,181 +1,137 @@
 import flet as ft
 import estilos
-from sqlalchemy.orm import joinedload
+from sqlalchemy.exc import IntegrityError
 
-from componentes import (
-    aplicar_tema,
-    crear_header,
-    crear_menu_mas,
-    configurar_navbar,
-)
-
+from componentes import aplicar_tema, crear_header, crear_menu_mas, configurar_navbar
 from database import SessionLocal
-from models import Maquina, Area
-from services import actualizar_maquina  # Asegúrate de tener o crear esta función en services.py
+from models import Area, Maquina, CriterioInspeccion
+
+
+TEXTO = estilos.COLOR_TEXTO
+GRIS = "#5F6670"
+NARANJA = estilos.COLOR_PRINCIPAL
+
+
+def campo(etiqueta, valor="", pista="", disabled=False):
+    return ft.TextField(
+        label=etiqueta,
+        value=valor or "",
+        hint_text=pista,
+        read_only=disabled,
+        border_color="#A3A8B1",
+        focused_border_color=NARANJA,
+        label_style=ft.TextStyle(size=12, color="#505966"),
+        hint_style=ft.TextStyle(color="#7B8493", size=12),
+        bgcolor="#F3F4F6" if disabled else "#FFFFFF",
+        color=TEXTO,
+        expand=True,
+    )
+
+
+def desplegable(etiqueta, opciones, valor=None, expand=True, width=None):
+    return ft.Dropdown(
+        label=etiqueta,
+        value=valor,
+        options=[ft.DropdownOption(key=str(k), text=str(v)) for k, v in opciones],
+        border_color="#A3A8B1",
+        focused_border_color=NARANJA,
+        label_style=ft.TextStyle(size=12, color="#505966"),
+        bgcolor="#FFFFFF",
+        color=TEXTO,
+        expand=expand,
+        width=width,
+    )
+
+
+def aviso(page, mensaje):
+    barra = ft.SnackBar(content=ft.Text(mensaje, color="#FFFFFF"), bgcolor=TEXTO)
+    page.overlay.append(barra)
+    barra.open = True
+    page.update()
+
 
 def vista_editar_maquina(page: ft.Page, codigo_maquina: str):
-    page.title = f"QualityCheck - Editar {codigo_maquina}"
+    aplicar_tema(page)
     page.padding = 0
     page.bgcolor = estilos.COLOR_FONDO
+    page.title = f"QualityCheck - Editar {codigo_maquina}"
     page.floating_action_button = None
 
-    aplicar_tema(page)
     menu_mas = crear_menu_mas(page)
 
-    def mostrar_mensaje(mensaje):
-        snackbar = ft.SnackBar(
-            content=ft.Text(mensaje, color="#FFFFFF"),
-            bgcolor=estilos.COLOR_TEXTO,
-        )
-        page.overlay.append(snackbar)
-        snackbar.open = True
-        page.update()
-
-    # 🔗 1. CONSULTAR DATOS DE LA MÁQUINA Y ÁREAS EN SUPABASE
     with SessionLocal() as db:
-        maquina = (
-            db.query(Maquina)
-            .options(joinedload(Maquina.area_rel))
-            .filter(Maquina.codigo_maquina == codigo_maquina, Maquina.activa == True)
-            .first()
-        )
-        lista_areas = db.query(Area).filter(Area.activa == True).all()
-
-    if not maquina:
-        page.add(ft.Text("La máquina a editar no existe o fue desactivada.", color="#DC2626"))
-        return
-
-    # Opciones para el selector de áreas
-    opciones_areas = [
-        ft.DropdownOption(key=str(area.id_area), text=area.nombre)
-        for area in lista_areas
-    ]
-
-    # Controles prellenados con la información actual de la base de datos
-    def crear_campo(label, value=""):
-        return ft.TextField(
-            label=label,
-            value=value or "",
-            border_color="#BDBDBD",
-            focused_border_color=estilos.COLOR_PRINCIPAL,
-            label_style=ft.TextStyle(size=11, color=estilos.COLOR_TEXTO_SECUNDARIO),
-            bgcolor="#FFFFFF",
-            color=estilos.COLOR_TEXTO,
-            expand=True,
-        )
-
-    codigo = crear_campo("Código *", maquina.codigo_maquina)
-    nombre = crear_campo("Nombre *", maquina.nombre)
-    marca = crear_campo("Marca", maquina.marca)
-    modelo = crear_campo("Modelo", maquina.modelo)
-    ubicacion = crear_campo("Ubicación", maquina.ubicacion)
-
-    dd_area = ft.Dropdown(
-        label="Área *",
-        value=str(maquina.id_area),
-        options=opciones_areas,
-        border_color="#BDBDBD",
-        focused_border_color=estilos.COLOR_PRINCIPAL,
-        bgcolor="#FFFFFF",
-        color=estilos.COLOR_TEXTO,
-        expand=True,
-    )
-
-    estado = ft.Dropdown(
-        label="Estado",
-        value=maquina.estado or "Operativa",
-        options=[
-            ft.DropdownOption(key="Operativa", text="Operativa"),
-            ft.DropdownOption(key="En revisión", text="En revisión"),
-            ft.DropdownOption(key="Fuera de servicio", text="Fuera de servicio"),
-        ],
-        border_color="#BDBDBD",
-        focused_border_color=estilos.COLOR_PRINCIPAL,
-        bgcolor="#FFFFFF",
-        color=estilos.COLOR_TEXTO,
-        expand=True,
-    )
-
-    
-
-    # 🔑 2. FUNCIÓN PARA APLICAR LOS CAMBIOS EN POSTGRESQL (UPDATE)
-    def guardar_cambios(e):
-        if not codigo.value or not nombre.value or not dd_area.value:
-            mostrar_mensaje("Complete los campos obligatorios (*).")
+        maq = db.query(Maquina).filter(
+            Maquina.codigo_maquina == codigo_maquina,
+            Maquina.activa.is_(True),
+        ).first()
+        if not maq:
+            page.add(ft.Text("La máquina no existe o está inactiva.", color="#DC2626"))
             return
 
-        datos_actualizados = {
-            "codigo_maquina": codigo.value.strip(),
-            "nombre": nombre.value.strip(),
-            "marca": marca.value.strip() if marca.value else None,
-            "modelo": modelo.value.strip() if modelo.value else None,
-            "ubicacion": ubicacion.value.strip() if ubicacion.value else None,
-            "id_area": int(dd_area.value),
-            "estado": estado.value,
+        areas = [
+            (str(a.id_area), a.nombre)
+            for a in db.query(Area).filter(Area.activa.is_(True)).order_by(Area.nombre).all()
+        ]
+        criterios_db = (
+            db.query(CriterioInspeccion)
+            .filter(
+                CriterioInspeccion.id_maquina == maq.id_maquina,
+                CriterioInspeccion.activo.is_(True),
+            )
+            .order_by(CriterioInspeccion.id_criterio)
+            .all()
+        )
+
+        datos = {
+            "id": maq.id_maquina,
+            "codigo": maq.codigo_maquina,
+            "nombre": maq.nombre,
+            "marca": maq.marca,
+            "modelo": maq.modelo,
+            "ubicacion": maq.ubicacion,
+            "id_area": maq.id_area,
+            "estado": maq.estado,
         }
+        criterios = [
+            {"id": c.id_criterio, "nombre": c.nombre_criterio, "categoria": c.categoria}
+            for c in criterios_db
+        ]
 
-        try:
-            with SessionLocal() as db:
-                # Localizamos el registro persistido y actualizamos sus atributos
-                maq_db = db.query(Maquina).filter(Maquina.id_maquina == maquina.id_maquina).first()
-                if maq_db:
-                    for clave, valor in datos_actualizados.items():
-                        setattr(maq_db, clave, valor)
-                    db.commit()
-
-            mostrar_mensaje("Máquina actualizada correctamente.")
-            page.go(f"/maquinas/{codigo.value.strip()}")
-
-        except Exception as ex:
-            mostrar_mensaje(f"Error al actualizar la máquina: {ex}")
-
-    def cancelar(e):
-        page.go(f"/maquinas/{codigo_maquina}")
-
-    
-
-    header = crear_header(titulo=f"Editar: {codigo_maquina}")
-
-# --- CONTROLES DE CRITERIOS DE INSPECCIÓN ---
-    lista_criterios_ui = ft.Column(spacing=6)
-    criterios_temporales = []  # Almacena los criterios agregados temporalmente
-
-    txt_nuevo_criterio = ft.TextField(
-        label="Nombre del criterio / punto a revisar",
-        hint_text="Ej. Nivel de aceite hidráulico",
-        border_color="#BDBDBD",
-        focused_border_color=estilos.COLOR_PRINCIPAL,
-        bgcolor="#FFFFFF",
-        color=estilos.COLOR_TEXTO,
-        expand=True,
+    codigo = campo("Código", datos["codigo"], disabled=True)
+    nombre = campo("Nombre *", datos["nombre"])
+    marca = campo("Marca", datos["marca"])
+    modelo = campo("Modelo", datos["modelo"])
+    ubicacion = campo("Ubicación", datos["ubicacion"])
+    area = desplegable("Área *", areas, str(datos["id_area"]))
+    estado = desplegable(
+        "Estado",
+        [(x, x) for x in ("Operativa", "En revisión", "Fuera de servicio")],
+        datos["estado"] or "Operativa",
     )
 
-    dd_categoria_criterio = ft.Dropdown(
-        label="Categoría",
-        value="General",
-        options=[
-            ft.DropdownOption("General"),
-            ft.DropdownOption("Seguridad"),
-            ft.DropdownOption("Mecánico"),
-            ft.DropdownOption("Eléctrico"),
-            ft.DropdownOption("Neumático"),
-        ],
-        border_color="#BDBDBD",
-        focused_border_color=estilos.COLOR_PRINCIPAL,
-        bgcolor="#FFFFFF",
-        color=estilos.COLOR_TEXTO,
-        width=150,
+    nuevo_nombre = campo("Nombre del criterio / punto a revisar", pista="Ej. Nivel de aceite hidráulico")
+    categoria = desplegable(
+        "Categoría",
+        [(c, c) for c in ("General", "Seguridad", "Mantenimiento", "Mecánico", "Eléctrico", "Neumático", "Calidad")],
+        "General",
+        expand=False,
+        width=145,
     )
+    lista = ft.Column(spacing=8)
 
-    def renderizar_criterios():
-        lista_criterios_ui.controls = [
+    def quitar(indice):
+        criterios.pop(indice)
+        render()
+
+    def render():
+        lista.controls = [
             ft.Container(
                 content=ft.Row(
                     [
                         ft.Column(
                             [
-                                ft.Text(c["nombre_criterio"], size=13, weight=ft.FontWeight.BOLD, color=estilos.COLOR_TEXTO),
-                                ft.Text(f"Categoría: {c['categoria']}", size=11, color=estilos.COLOR_TEXTO_SECUNDARIO),
+                                ft.Text(c["nombre"], size=13, weight=ft.FontWeight.BOLD, color=TEXTO),
+                                ft.Text(f"Categoría: {c['categoria']}", size=11, color=GRIS),
                             ],
                             spacing=2,
                             expand=True,
@@ -183,76 +139,138 @@ def vista_editar_maquina(page: ft.Page, codigo_maquina: str):
                         ft.IconButton(
                             icon=ft.Icons.DELETE_OUTLINE,
                             icon_color="#DC2626",
-                            tooltip="Quitar criterio",
-                            on_click=lambda _, idx=i: quitar_criterio(idx),
+                            tooltip="Desactivar criterio",
+                            on_click=lambda e, idx=i: quitar(idx),
                         ),
                     ],
-                    alignment=ft.MainAxisAlignment.BETWEEN,
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 ),
                 bgcolor="#FFFFFF",
-                padding=8,
+                padding=9,
                 border_radius=8,
-                border=ft.Border(
-                    top=ft.BorderSide(1, "#E1E3E6"),
-                    bottom=ft.BorderSide(1, "#E1E3E6"),
-                    left=ft.BorderSide(1, "#E1E3E6"),
-                    right=ft.BorderSide(1, "#E1E3E6"),
-                ),
+                border=ft.Border.all(1, "#DFE3EB"),
             )
-            for i, c in enumerate(criterios_temporales)
+            for i, c in enumerate(criterios)
         ]
         page.update()
 
-    def agregar_criterio(e):
-        if txt_nuevo_criterio.value.strip():
-            criterios_temporales.append({
-                "nombre_criterio": txt_nuevo_criterio.value.strip(),
-                "categoria": dd_categoria_criterio.value,
-            })
-            txt_nuevo_criterio.value = ""
-            renderizar_criterios()
+    def agregar(e):
+        texto = (nuevo_nombre.value or "").strip()
+        if not texto:
+            aviso(page, "Escribe el nombre del criterio.")
+            return
+        if any(c["nombre"].casefold() == texto.casefold() for c in criterios):
+            aviso(page, "Ese criterio ya está agregado.")
+            return
+        criterios.append(
+            {
+                "id": None,
+                "nombre": texto,
+                "categoria": categoria.value or "General",
+            }
+        )
+        nuevo_nombre.value = ""
+        render()
 
-    def quitar_criterio(index):
-        criterios_temporales.pop(index)
-        renderizar_criterios()
+    def guardar(e):
+        nom = (nombre.value or "").strip()
+        if not nom or not area.value:
+            aviso(page, "Completa nombre y área.")
+            return
+        if not criterios:
+            aviso(page, "Agrega al menos un criterio de inspección.")
+            return
 
-    btn_agregar_criterio = ft.IconButton(
-        icon=ft.Icons.ADD_CIRCLE,
-        icon_color=estilos.COLOR_PRINCIPAL,
-        tooltip="Añadir criterio",
-        on_click=agregar_criterio,
-    )
+        try:
+            with SessionLocal.begin() as db:
+                m = db.query(Maquina).filter(Maquina.id_maquina == datos["id"]).first()
+                if not m:
+                    raise ValueError("La máquina ya no existe.")
+
+                m.nombre = nom
+                m.marca = (marca.value or "").strip() or None
+                m.modelo = (modelo.value or "").strip() or None
+                m.ubicacion = (ubicacion.value or "").strip() or None
+                m.id_area = int(area.value)
+                m.estado = estado.value or "Operativa"
+
+                activos = {c["id"] for c in criterios if c["id"] is not None}
+
+                for original in db.query(CriterioInspeccion).filter(
+                    CriterioInspeccion.id_maquina == datos["id"],
+                    CriterioInspeccion.activo.is_(True),
+                ).all():
+                    if original.id_criterio not in activos:
+                        original.activo = False
+
+                for c in criterios:
+                    if c["id"] is None:
+                        db.add(
+                            CriterioInspeccion(
+                                id_maquina=datos["id"],
+                                nombre_criterio=c["nombre"],
+                                categoria=c["categoria"],
+                                activo=True,
+                            )
+                        )
+
+            page.go(f"/maquinas/{datos['codigo']}")
+        except Exception as ex:
+            aviso(page, f"No se pudo guardar: {ex}")
 
     seccion_criterios = ft.Column(
         [
-            ft.Divider(height=1, color="#E1E3E6"),
-            ft.Text("Criterios de Inspección Específicos", size=16, weight=ft.FontWeight.BOLD, color=estilos.COLOR_TEXTO),
-            ft.Text("Define los puntos técnicos que se evaluarón obligatoriamente en cada revisión preventiva.", size=12, color=estilos.COLOR_TEXTO_SECUNDARIO),
-            ft.Row([txt_nuevo_criterio, dd_categoria_criterio, btn_agregar_criterio], spacing=8),
-            lista_criterios_ui,
+            ft.Divider(height=1, color="#DFE3EB"),
+            ft.Text("Criterios de inspección", size=16, weight=ft.FontWeight.BOLD, color=TEXTO),
+            ft.Text(
+                "Los criterios retirados se desactivan para conservar el historial de revisiones.",
+                size=12,
+                color=GRIS,
+            ),
+            ft.Row(
+                [
+                    nuevo_nombre,
+                    categoria,
+                    ft.IconButton(
+                        icon=ft.Icons.ADD_CIRCLE,
+                        icon_color=NARANJA,
+                        tooltip="Agregar criterio",
+                        on_click=agregar,
+                    ),
+                ],
+                spacing=8,
+            ),
+            lista,
         ],
-        spacing=8,
+        spacing=9,
     )
 
     formulario = ft.Column(
-        controls=[
-            ft.Text("Editar máquina", size=20, weight=ft.FontWeight.BOLD, color=estilos.COLOR_TEXTO),
-            ft.Text("Modifica las especificaciones o ubicación de la máquina.", size=13, color=estilos.COLOR_TEXTO_SECUNDARIO),
-            ft.Container(height=12),
+        [
+            ft.Text("Editar máquina", size=20, weight=ft.FontWeight.BOLD, color=TEXTO),
+            ft.Text(
+                "El código es permanente y no puede modificarse.",
+                size=12,
+                color=GRIS,
+            ),
+            ft.Container(height=8),
             ft.Row([codigo, nombre], spacing=12),
             ft.Row([marca, modelo], spacing=12),
-            ft.Row([dd_area, ubicacion], spacing=12),
-            ft.Row([estado], spacing=12),
-            ft.Container(height=16),
+            ft.Row([area, ubicacion], spacing=12),
+            ft.Row([estado]),
+            ft.Container(height=10),
             seccion_criterios,
-            ft.Container(height=16),
+            ft.Container(height=10),
             ft.Row(
                 [
-                    ft.TextButton(content=ft.Text("Cancelar", color=estilos.COLOR_TEXTO), on_click=cancelar),
+                    ft.TextButton(
+                        content=ft.Text("Cancelar", color=TEXTO),
+                        on_click=lambda e: page.go(f"/maquinas/{datos['codigo']}"),
+                    ),
                     ft.Button(
-                        content=ft.Text("Guardar cambios", color=estilos.COLOR_TEXTO, weight=ft.FontWeight.BOLD),
-                        bgcolor=estilos.COLOR_PRINCIPAL,
-                        on_click=guardar_cambios,
+                        content=ft.Text("Guardar cambios", weight=ft.FontWeight.BOLD, color=TEXTO),
+                        bgcolor=NARANJA,
+                        on_click=guardar,
                     ),
                 ],
                 alignment=ft.MainAxisAlignment.END,
@@ -264,22 +282,23 @@ def vista_editar_maquina(page: ft.Page, codigo_maquina: str):
         expand=True,
     )
 
-    cuerpo = ft.Container(content=formulario, padding=20, expand=True)
-    configurar_navbar(page, menu_mas, indice_inicial=0)
-
-    contenido = ft.Stack(
-        [
-            cuerpo,
-            ft.Container(content=menu_mas, right=15, bottom=15),
-        ],
-        expand=True,
-    )
+    configurar_navbar(page, menu_mas, indice_inicial=1)
 
     page.add(
         ft.Column(
-            [header, contenido],
+            [
+                crear_header(titulo=f"Editar: {datos['codigo']}"),
+                ft.Stack(
+                    [
+                        ft.Container(content=formulario, padding=20, expand=True),
+                        ft.Container(content=menu_mas, right=15, bottom=15),
+                    ],
+                    expand=True,
+                ),
+            ],
             spacing=0,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             expand=True,
         )
     )
+    render()
