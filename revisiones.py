@@ -634,11 +634,11 @@ def vista_revisiones(page: ft.Page):
                     import os
                     base = os.environ.get('QC_PUBLIC_BASE_URL', 'https://qualitycheck-e4nz.onrender.com').rstrip('/')
                     enlace = base + '/qc-download/' + token
-                    # Navegación dentro de la misma ventana, sin abrir el navegador externo.
+                    # Abrir la descarga en ventana independiente: la vista Flet no debe navegar ni reiniciarse.
                     launcher = ft.UrlLauncher()
                     page.services.append(launcher)
                     page.update()
-                    await launcher.launch_url(enlace, web_only_window_name='_self')
+                    await launcher.launch_url(enlace, web_only_window_name='_blank')
                 else:
                     destino = await selector_pdf.save_file(
                         dialog_title='Guardar reporte PDF', file_name=r['codigo'] + '.pdf',
