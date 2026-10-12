@@ -44,7 +44,7 @@ def crear_header(titulo=None):
         content=ft.Row(
             [
                 ft.Container(
-                    content=ft.Image(src_base64=_logo_base64(), width=44, height=44, fit=ft.BoxFit.CONTAIN),
+                    content=ft.Image(src=_logo_base64(), width=44, height=44, fit=ft.BoxFit.CONTAIN),
                     width=44,
                     height=44,
                     bgcolor="#FFFFFF",
