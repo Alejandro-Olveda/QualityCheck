@@ -65,6 +65,7 @@ def vista_usuarios_roles(page: ft.Page):
 
         nombre = campo(ft.TextField(label="Nombre *", value=usuario["nombre"]))
         correo = campo(ft.TextField(label="Correo *", value=usuario["correo"]))
+        nombre_usuario = campo(ft.TextField(label="Usuario de acceso *", value=usuario.get("nombre_usuario") or ""))
         rol = campo(ft.Dropdown(
             label="Rol *",
             value=usuario.get("rol") or None,
@@ -98,6 +99,7 @@ def vista_usuarios_roles(page: ft.Page):
                         ),
                         nombre,
                         correo,
+                        nombre_usuario,
                         rol,
                         activo,
                         nueva_password,
@@ -117,6 +119,7 @@ def vista_usuarios_roles(page: ft.Page):
                     id_usuario=usuario["id"],
                     nombre=nombre.value,
                     correo=correo.value,
+                    nombre_usuario=nombre_usuario.value,
                     nombre_rol=rol.value,
                     activo=activo.value,
                     nueva_contrasena=nueva_password.value,
@@ -178,7 +181,7 @@ def vista_usuarios_roles(page: ft.Page):
                 content=ft.Column(
                     [
                         ft.Text(
-                            "Registra una cuenta y asígnale su rol de acceso.",
+                            "El usuario de acceso se genera automáticamente con el primer nombre y apellido paterno.",
                             size=12,
                             color=SECUNDARIO,
                         ),
@@ -265,6 +268,11 @@ def vista_usuarios_roles(page: ft.Page):
                         ),
                         ft.Text(
                             usuario["correo"],
+                            size=11,
+                            color=SECUNDARIO,
+                        ),
+                        ft.Text(
+                            "Usuario: " + (usuario.get("nombre_usuario") or "Sin asignar"),
                             size=11,
                             color=SECUNDARIO,
                         ),

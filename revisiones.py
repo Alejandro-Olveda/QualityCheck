@@ -2,6 +2,8 @@
 from io import BytesIO
 from datetime import date
 from pathlib import Path
+from sqlalchemy import text
+from database import SessionLocal
 from xml.sax.saxutils import escape
 
 import flet as ft
@@ -40,7 +42,7 @@ def construir_pdf(revision, detalle):
     salida = BytesIO()
     doc = SimpleDocTemplate(salida, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     fecha = revision['fecha'].strftime('%d/%m/%Y %H:%M') if revision['fecha'] else '—'
-    story = [p('QUALITYCHECK / REPORTE DE INSPECCIÓN'), Spacer(1, 12)]
+    story = [p('QUALITYCHECK / REPORTE DE HALLAZGOS, ACCIONES CORRECTIVAS Y RESULTADOS'), Spacer(1, 12)]
     for etiqueta, valor in [
         ('Revisión', revision['codigo']), ('Máquina', revision['codigo_maquina'] + ' · ' + revision['maquina']),
         ('Inspector', revision['inspector']), ('Tipo', revision['tipo']),
@@ -67,6 +69,48 @@ def construir_pdf(revision, detalle):
     story.append(p('Hallazgos registrados: ' + str(len(detalle['hallazgos']))))
     for h in detalle['hallazgos']:
         story.append(p(f"• {h['descripcion']} ({h['severidad']}; {h['estado']})"))
+
+    # Seguimiento real del hallazgo: se muestra aun cuando la corrección está pendiente.
+    with SessionLocal() as db:
+        acciones = db.execute(text("""
+            SELECT h.descripcion AS hallazgo, h.nivel_severidad AS severidad,
+                   ac.descripcion_accion, ac.estado, ac.fecha_compromiso,
+                   ac.fecha_realizada, ac.fecha_verificacion,
+                   ac.observaciones_tecnico, ac.observaciones_verificacion,
+                   COALESCE(tec.nombre, ac.responsable) AS tecnico,
+                   ver.nombre AS verificador
+            FROM hallazgos h
+            LEFT JOIN acciones_correctivas ac ON ac.id_hallazgo = h.id_hallazgo
+            LEFT JOIN usuarios tec ON tec.id_usuario = ac.id_responsable
+            LEFT JOIN usuarios ver ON ver.id_usuario = ac.id_verificador
+            WHERE h.id_inspeccion = :id
+            ORDER BY h.id_hallazgo, ac.id_accion
+        """), {'id': revision['id']}).mappings().all()
+
+    if acciones:
+        story.append(Spacer(1, 16))
+        story.append(p('SEGUIMIENTO DE ACCIONES CORRECTIVAS Y RESULTADOS'))
+        story.append(Spacer(1, 8))
+        def fecha_pdf(valor):
+            return valor.strftime('%d/%m/%Y') if valor else '—'
+        for a in acciones:
+            story.append(p('Hallazgo: ' + a['hallazgo']))
+            if not a['descripcion_accion']:
+                story.append(p('Acción correctiva: pendiente de asignación'))
+            else:
+                for etiqueta, valor in [
+                    ('Acción correctiva', a['descripcion_accion']),
+                    ('Técnico', a['tecnico']),
+                    ('Estado', a['estado']),
+                    ('Fecha compromiso', fecha_pdf(a['fecha_compromiso'])),
+                    ('Fecha realizada', fecha_pdf(a['fecha_realizada'])),
+                    ('Trabajo realizado / resultados', a['observaciones_tecnico'] or 'Pendiente'),
+                    ('Verificador', a['verificador'] or 'Pendiente'),
+                    ('Fecha de verificación', fecha_pdf(a['fecha_verificacion'])),
+                    ('Resultado de verificación', a['observaciones_verificacion'] or 'Pendiente'),
+                ]:
+                    story.append(p(f'{etiqueta}: {valor}'))
+            story.append(Spacer(1, 10))
     doc.build(story)
     return salida.getvalue()
 

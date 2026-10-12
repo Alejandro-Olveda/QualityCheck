@@ -1,3 +1,5 @@
+from sqlalchemy import func
+from usuarios_login import generar_usuario_disponible, limpiar_nombre_usuario
 from datetime import date, datetime
 from uuid import uuid4
 
@@ -434,12 +436,12 @@ def listar_roles():
 def listar_usuarios_roles():
     with SessionLocal() as db:
         filas = db.execute(text("""
-            SELECT u.id_usuario, u.nombre, u.correo, u.activo,
+            SELECT u.id_usuario, u.nombre, u.correo, u.nombre_usuario, u.activo,
                    string_agg(r.nombre_rol, ', ' ORDER BY r.nombre_rol) AS roles
             FROM usuarios u
             LEFT JOIN usuario_roles ur ON ur.id_usuario = u.id_usuario
             LEFT JOIN roles r ON r.id_rol = ur.id_rol
-            GROUP BY u.id_usuario, u.nombre, u.correo, u.activo
+            GROUP BY u.id_usuario, u.nombre, u.correo, u.nombre_usuario, u.activo
             ORDER BY u.nombre
         """)).mappings().all()
         salida = []
@@ -450,6 +452,7 @@ def listar_usuarios_roles():
                 "id": f["id_usuario"],
                 "nombre": f["nombre"],
                 "correo": f["correo"],
+                "nombre_usuario": f["nombre_usuario"],
                 "activo": f["activo"],
                 "rol": principal,
             })
@@ -491,7 +494,11 @@ def crear_usuario_con_rol(nombre, correo, contrasena, nombre_rol):
             if rol_id is None:
                 raise ValueError("Rol no válido.")
 
-            usuario = Usuario(nombre=nombre, correo=correo, contrasena_hash=contrasena, activo=True)
+            usuario = Usuario(
+                nombre=nombre, correo=correo,
+                nombre_usuario=generar_usuario_disponible(db, nombre),
+                contrasena_hash=contrasena, activo=True,
+            )
             db.add(usuario)
             db.flush()
             db.execute(text("INSERT INTO usuario_roles(id_usuario,id_rol) VALUES(:u,:r)"), {"u": usuario.id_usuario, "r": rol_id})
@@ -510,6 +517,7 @@ def actualizar_usuario_admin(
     nombre_rol,
     activo=True,
     nueva_contrasena=None,
+    nombre_usuario=None,
 ):
 
     try:
@@ -571,8 +579,19 @@ def actualizar_usuario_admin(
             if rol_id is None:
                 raise ValueError("El rol seleccionado no existe.")
 
+            nombre_acceso = limpiar_nombre_usuario(nombre_usuario) if nombre_usuario is not None else usuario.nombre_usuario
+            if not nombre_acceso:
+                raise ValueError("El usuario de acceso no puede estar vacío.")
+            repetido = db.query(Usuario.id_usuario).filter(
+                func.lower(Usuario.nombre_usuario) == nombre_acceso.lower(),
+                Usuario.id_usuario != id_usuario,
+            ).first()
+            if repetido:
+                raise ValueError("Ese nombre de usuario ya está ocupado.")
+
             usuario.nombre = nombre
             usuario.correo = correo
+            usuario.nombre_usuario = nombre_acceso
             usuario.activo = bool(activo)
 
             nueva_contrasena = (nueva_contrasena or "").strip()

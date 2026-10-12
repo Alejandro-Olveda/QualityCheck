@@ -10,10 +10,15 @@ from revisiones import vista_revisiones
 from hallazgos import vista_hallazgos
 from usuarios_roles import vista_usuarios_roles
 from bitacora import vista_bitacora
+from alertas import vista_alertas
+from historial import vista_historial
+from configuracion import vista_configuracion
+from perfil import vista_perfil
 from database import SessionLocal
-from services import validar_login
 from models import Usuario
 from revision_backend import obtener_rol_usuario
+from recordar_usuario import leer_usuario_recordado, guardar_usuario_recordado, borrar_usuario_recordado
+from sqlalchemy import func
 
 
 def main(page: ft.Page):
@@ -24,10 +29,16 @@ def main(page: ft.Page):
     page.window.height = 700
     page.window.resizable = False
 
-    def mostrar_snackbar(mensaje):
-        snackbar = ft.SnackBar(content=ft.Text(mensaje, color="#FFFFFF"), bgcolor="#25252B")
-        page.overlay.append(snackbar)
-        snackbar.open = True
+    def mostrar_error_pantalla(seccion, error):
+        page.clean()
+        page.add(ft.Column([
+            crear_header(seccion),
+            ft.Container(content=ft.Column([
+                ft.Text("No se pudo abrir " + seccion, size=18, weight=ft.FontWeight.BOLD, color="#25252B"),
+                ft.Text(str(error), size=12, color="#B91C1C", selectable=True),
+                ft.Button("Volver al inicio", on_click=lambda e: page.go("/dashboard")),
+            ], spacing=15), padding=20),
+        ], expand=True))
         page.update()
 
     def cambiar_ruta(e):
@@ -74,6 +85,18 @@ def main(page: ft.Page):
             vista_usuarios_roles(page)
         elif page.route == "/bitacora":
             vista_bitacora(page)
+        elif page.route in ("/alertas", "/configuracion"):
+            try:
+                vista_configuracion(page)
+            except Exception as exc:
+                mostrar_error_pantalla("Configuración", exc)
+        elif page.route == "/perfil":
+            try:
+                vista_perfil(page)
+            except Exception as exc:
+                mostrar_error_pantalla("Mi perfil", exc)
+        elif page.route == "/historial":
+            vista_historial(page)
         elif page.route.startswith("/maquinas/"):
             codigo_maquina = page.route.rsplit("/", 1)[-1]
             vista_detalle_maquina(page, codigo_maquina)
@@ -84,46 +107,67 @@ def main(page: ft.Page):
             page.go("/dashboard")
 
     lbl_error = ft.Text("", color="#DC2626", size=12, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)
+    usuario_guardado = leer_usuario_recordado()
 
     def iniciar_sesion(e):
         identificador = (txt_usuario.value or "").strip()
         contrasena = txt_password.value or ""
-        usuario_valido = None
+        lbl_error.value = ""
 
-        with SessionLocal() as db:
-            usuario_valido = validar_login(db, identificador, contrasena)
+        if not identificador or not contrasena:
+            lbl_error.value = "Ingresa tu usuario y contraseña."
+            page.update()
+            return
 
-            if not usuario_valido and "@" not in identificador and identificador:
-                candidatos = db.query(Usuario).filter(
-                    Usuario.correo.ilike(f"{identificador}@%"),
+        btn_entrar.disabled = True
+        page.update()
+        try:
+            with SessionLocal() as db:
+                usuario_valido = db.query(Usuario).filter(
                     Usuario.activo.is_(True),
-                ).all()
-                if len(candidatos) == 1 and candidatos[0].contrasena_hash == contrasena:
-                    usuario_valido = candidatos[0]
+                    (func.lower(Usuario.nombre_usuario) == identificador.lower())
+                    | (func.lower(Usuario.correo) == identificador.lower()),
+                    Usuario.contrasena_hash == contrasena,
+                ).first()
 
-            if usuario_valido:
-                page.session.store.set("usuario_id", usuario_valido.id_usuario)
-                page.session.store.set("usuario_nombre", usuario_valido.nombre)
-                page.session.store.set("usuario_rol", obtener_rol_usuario(usuario_valido.id_usuario))
+                if not usuario_valido:
+                    lbl_error.value = "Usuario o contraseña incorrectos."
+                    page.update()
+                    return
 
-        if usuario_valido:
-            lbl_error.value = ""
+                usuario_id = usuario_valido.id_usuario
+                nombre = usuario_valido.nombre
+                rol = obtener_rol_usuario(usuario_id)
+
+            if rol not in ("Administrador", "Inspector", "Técnico"):
+                lbl_error.value = "Tu cuenta no tiene un rol asignado. Contacta al administrador."
+                page.update()
+                return
+
+            page.session.store.set("usuario_id", usuario_id)
+            page.session.store.set("usuario_nombre", nombre)
+            page.session.store.set("usuario_rol", rol)
+
+            try:
+                if checkbox_recordar.value:
+                    guardar_usuario_recordado(identificador)
+                else:
+                    borrar_usuario_recordado()
+            except OSError:
+                pass
+
+            txt_password.value = ""
             page.go("/dashboard")
-        else:
-            lbl_error.value = "Usuario o contraseña incorrectos"
+        except Exception:
+            lbl_error.value = "No se pudo iniciar sesión. Revisa la conexión e inténtalo de nuevo."
+            page.update()
+        finally:
+            btn_entrar.disabled = False
             page.update()
 
     def cerrar_recuperacion(e):
         dialogo_recuperacion.open = False
         page.update()
-
-    def enviar_recuperacion(e):
-        if correo_recuperacion.value:
-            dialogo_recuperacion.open = False
-            page.update()
-            mostrar_snackbar("Se enviaron instrucciones de recuperación.")
-        else:
-            mostrar_snackbar("Ingrese un correo electrónico.")
 
     def abrir_recuperacion(e):
         if dialogo_recuperacion not in page.overlay:
@@ -136,7 +180,7 @@ def main(page: ft.Page):
 
     txt_titulo = ft.Text("Inicia sesión", size=20, weight=ft.FontWeight.BOLD, color="#25252B", width=320)
     txt_usuario = ft.TextField(
-        label="USUARIO/CORREO",
+        label="USUARIO O CORREO",
         hint_text="Ingrese su usuario o correo electrónico",
         hint_style=ft.TextStyle(size=12, color="#6B7280"),
         border_color="#BDBDBD",
@@ -145,6 +189,7 @@ def main(page: ft.Page):
         width=320,
         bgcolor="#FFFFFF",
         color="#25252B",
+        value=usuario_guardado,
     )
     txt_password = ft.TextField(
         label="CONTRASEÑA",
@@ -158,32 +203,32 @@ def main(page: ft.Page):
         width=320,
         bgcolor="#FFFFFF",
         color="#25252B",
+        on_submit=iniciar_sesion,
     )
 
-    checkbox_recordar = ft.Checkbox(value=False, active_color="#F5A000")
+    def cambiar_recordar(valor):
+        if not valor:
+            borrar_usuario_recordado()
+
+    checkbox_recordar = ft.Checkbox(
+        value=bool(usuario_guardado),
+        active_color="#F5A000",
+        on_change=lambda e: cambiar_recordar(e.control.value),
+    )
     recordar_usuario = ft.Container(
         content=ft.Row([checkbox_recordar, ft.Text("Recordar usuario", size=12, color="#616161")], spacing=5),
         width=320,
     )
-    correo_recuperacion = ft.TextField(
-        label="Correo electrónico",
-        hint_text="Ingrese su correo electrónico",
-        border_color="#BDBDBD",
-        focused_border_color="#F5A000",
-        bgcolor="#FFFFFF",
-        color="#25252B",
-    )
     dialogo_recuperacion = ft.AlertDialog(
         title=ft.Text("Recuperación de contraseña", color="#25252B", weight=ft.FontWeight.BOLD),
-        content=ft.Column([
-            ft.Text("Ingrese su correo electrónico para recibir instrucciones de recuperación.", color="#616161", size=12),
-            ft.Container(height=10),
-            correo_recuperacion,
-        ], tight=True),
-        bgcolor="#F5F6F8",
+        content=ft.Text(
+            "Si olvidaste tu contraseña, comunícate con un administrador de QualityCheck para que te asigne una nueva.",
+            color="#616161",
+            size=13,
+        ),
+        bgcolor="#FFFFFF",
         actions=[
-            ft.TextButton(content=ft.Text("Cancelar", color="#25252B"), on_click=cerrar_recuperacion),
-            ft.TextButton(content=ft.Text("Enviar", color="#25252B", weight=ft.FontWeight.BOLD), on_click=enviar_recuperacion),
+            ft.TextButton(content=ft.Text("Entendido", color="#25252B", weight=ft.FontWeight.BOLD), on_click=cerrar_recuperacion),
         ],
     )
     recuperar_pass = ft.TextButton(
@@ -200,7 +245,7 @@ def main(page: ft.Page):
     pie_pagina = ft.Container(
         content=ft.Row([
             ft.Icon(ft.Icons.LOCK_OUTLINE, size=12, color="#919090"),
-            ft.Text("Acceso seguro según rol", size=11, color="#919090", italic=True),
+            ft.Text("Acceso según rol", size=11, color="#919090", italic=True),
         ], alignment=ft.MainAxisAlignment.CENTER, spacing=5, tight=True),
         bgcolor="#EBEEF2",
         padding=10,

@@ -5,6 +5,7 @@ import estilos
 from componentes import aplicar_tema, crear_header, crear_menu_mas, configurar_navbar
 from database import SessionLocal
 
+
 TEXTO = "#25252B"
 SECUNDARIO = "#5F6670"
 BORDE = "#DFE3EB"
@@ -24,45 +25,23 @@ def _fecha_texto(valor):
 
 
 def obtener_bitacora():
-    with SessionLocal() as db:
-        revisiones = db.execute(text("""
-            SELECT
-                CASE
-                    WHEN rev.tipo_inspeccion = 'Preventiva' THEN 'Preventivo'
-                    WHEN rev.tipo_inspeccion = 'Correctiva' THEN 'Correctivo'
-                    ELSE 'Inspección'
-                END AS tipo,
-                rev.id_inspeccion AS id_evento,
-                m.id_maquina,
-                m.codigo_maquina,
-                m.nombre AS maquina,
-                rev.fecha_inspeccion AS fecha,
-                COALESCE(rev.observaciones_generales, '') AS trabajo,
-                COALESCE(rev.observaciones_generales, '') AS observaciones,
-                u.nombre AS responsable,
-                NULL::varchar AS verificador,
-                COALESCE(rev.resultado_final, 'Pendiente') AS estado,
-                rev.codigo_inspeccion AS codigo_revision,
-                NULL::varchar AS hallazgo,
-                NULL::varchar AS severidad,
-                NULL::text AS observacion_verificacion
-            FROM revisiones rev
-            JOIN maquinas m
-              ON m.id_maquina = rev.id_maquina
-            JOIN usuarios u
-              ON u.id_usuario = rev.id_inspector
-        """)).mappings().all()
+    """Muestra trabajos correctivos realizados, nunca inspecciones.
 
-        correctivos = db.execute(text("""
+    Las revisiones programadas son inspecciones preventivas y no se
+    consideran mantenimiento ejecutado. Un mantenimiento preventivo real
+    requiere su propio registro de trabajo, que aún no existe en la BD.
+    """
+    with SessionLocal() as db:
+        filas = db.execute(text("""
             SELECT
-                'Correctivo verificado' AS tipo,
+                'Correctivo' AS tipo,
                 ac.id_accion AS id_evento,
                 m.id_maquina,
                 m.codigo_maquina,
                 m.nombre AS maquina,
-                COALESCE(ac.fecha_verificacion, ac.fecha_realizada, ac.fecha_compromiso) AS fecha,
+                ac.fecha_realizada AS fecha,
                 ac.descripcion_accion AS trabajo,
-                COALESCE(ac.observaciones_tecnico, '') AS observaciones,
+                ac.observaciones_tecnico AS observaciones,
                 COALESCE(tec.nombre, ac.responsable) AS responsable,
                 ver.nombre AS verificador,
                 ac.estado AS estado,
@@ -71,39 +50,16 @@ def obtener_bitacora():
                 h.nivel_severidad AS severidad,
                 COALESCE(ac.observaciones_verificacion, '') AS observacion_verificacion
             FROM acciones_correctivas ac
-            JOIN hallazgos h
-              ON h.id_hallazgo = ac.id_hallazgo
-            JOIN revisiones rev
-              ON rev.id_inspeccion = h.id_inspeccion
-            JOIN maquinas m
-              ON m.id_maquina = rev.id_maquina
-            LEFT JOIN usuarios tec
-              ON tec.id_usuario = ac.id_responsable
-            LEFT JOIN usuarios ver
-              ON ver.id_usuario = ac.id_verificador
-            WHERE ac.estado = 'Verificada'
+            JOIN hallazgos h ON h.id_hallazgo = ac.id_hallazgo
+            JOIN revisiones rev ON rev.id_inspeccion = h.id_inspeccion
+            JOIN maquinas m ON m.id_maquina = rev.id_maquina
+            LEFT JOIN usuarios tec ON tec.id_usuario = ac.id_responsable
+            LEFT JOIN usuarios ver ON ver.id_usuario = ac.id_verificador
+            WHERE ac.fecha_realizada IS NOT NULL
+              AND NULLIF(BTRIM(ac.observaciones_tecnico), '') IS NOT NULL
+            ORDER BY ac.fecha_realizada DESC, ac.id_accion DESC
         """)).mappings().all()
-
-        eventos = [dict(x) for x in revisiones] + [dict(x) for x in correctivos]
-
-        def clave_fecha(evento):
-            valor = evento.get("fecha")
-            if valor is None:
-                return 0.0
-            if hasattr(valor, "timestamp"):
-                try:
-                    return valor.timestamp()
-                except Exception:
-                    pass
-            try:
-                from datetime import datetime, time
-
-                return datetime.combine(valor, time.min).timestamp()
-            except Exception:
-                return 0.0
-
-        eventos.sort(key=clave_fecha, reverse=True)
-        return eventos
+        return [dict(fila) for fila in filas]
 
 
 def vista_bitacora(page: ft.Page):
@@ -156,23 +112,20 @@ def vista_bitacora(page: ft.Page):
         height=46,
     )
 
-    filtro_tipo = ft.Dropdown(
-        label="Tipo",
+    filtro_estado = ft.Dropdown(
+        label="Estado",
         value="Todos",
         options=[
             ft.DropdownOption(key="Todos", text="Todos"),
-            ft.DropdownOption(key="Inspección", text="Inspección"),
-            ft.DropdownOption(key="Preventivo", text="Preventivo"),
-            ft.DropdownOption(key="Correctivo", text="Correctivo"),
-            ft.DropdownOption(
-                key="Correctivo verificado", text="Correctivo verificado"
-            ),
+            ft.DropdownOption(key="Pendiente de verificación", text="Pendiente de verificación"),
+            ft.DropdownOption(key="Verificada", text="Verificada"),
+            ft.DropdownOption(key="Requiere ajuste", text="Requiere ajuste"),
         ],
         bgcolor=BLANCO,
         color=TEXTO,
         border_color="#A3A8B1",
         focused_border_color=estilos.COLOR_PRINCIPAL,
-        width=140,
+        width=170,
     )
 
     filtro_maquina = ft.Dropdown(
@@ -200,8 +153,6 @@ def vista_bitacora(page: ft.Page):
         page.update()
 
     def detalle_evento(e):
-        es_correctivo = e["tipo"] in ("Correctivo", "Correctivo verificado")
-
         filas = [
             ("Máquina", f'{e["codigo_maquina"]} · {e["maquina"]}'),
             ("Tipo", e["tipo"]),
@@ -211,14 +162,11 @@ def vista_bitacora(page: ft.Page):
             ("Estado", e.get("estado") or "—"),
         ]
 
-        if es_correctivo:
-            filas.extend(
-                [
-                    ("Hallazgo", e.get("hallazgo") or "—"),
-                    ("Severidad", e.get("severidad") or "—"),
-                    ("Verificado por", e.get("verificador") or "—"),
-                ]
-            )
+        filas.extend([
+                ("Hallazgo", e.get("hallazgo") or "—"),
+                ("Severidad", e.get("severidad") or "—"),
+                ("Verificado por", e.get("verificador") or "—"),
+        ])
 
         contenido = []
         for etiqueta, valor in filas:
@@ -226,37 +174,29 @@ def vista_bitacora(page: ft.Page):
                 ft.Column(
                     [
                         ft.Text(etiqueta, size=10, color=SECUNDARIO),
-                        ft.Text(
-                            str(valor), size=12, color=TEXTO, weight=ft.FontWeight.BOLD
-                        ),
+                        ft.Text(str(valor), size=12, color=TEXTO, weight=ft.FontWeight.BOLD),
                     ],
                     spacing=1,
                 )
             )
 
-        contenido.extend(
-            [
-                ft.Divider(height=1, color=BORDE),
-                ft.Text("Trabajo realizado / programado", size=11, color=SECUNDARIO),
-                ft.Text(e.get("trabajo") or "—", size=12, color=TEXTO),
-            ]
-        )
+        contenido.extend([
+            ft.Divider(height=1, color=BORDE),
+            ft.Text("Acción correctiva asignada", size=11, color=SECUNDARIO),
+            ft.Text(e.get("trabajo") or "—", size=12, color=TEXTO),
+        ])
 
         if e.get("observaciones"):
-            contenido.extend(
-                [
-                    ft.Text("Observaciones del responsable", size=11, color=SECUNDARIO),
-                    ft.Text(e["observaciones"], size=12, color=TEXTO),
-                ]
-            )
+            contenido.extend([
+                ft.Text("Trabajo realizado por el técnico", size=11, color=SECUNDARIO),
+                ft.Text(e["observaciones"], size=12, color=TEXTO),
+            ])
 
         if e.get("observacion_verificacion"):
-            contenido.extend(
-                [
-                    ft.Text("Observaciones de verificación", size=11, color=SECUNDARIO),
-                    ft.Text(e["observacion_verificacion"], size=12, color=TEXTO),
-                ]
-            )
+            contenido.extend([
+                ft.Text("Observaciones de verificación", size=11, color=SECUNDARIO),
+                ft.Text(e["observacion_verificacion"], size=12, color=TEXTO),
+            ])
 
         d = ft.AlertDialog(
             title=ft.Text(
@@ -291,23 +231,9 @@ def vista_bitacora(page: ft.Page):
         page.update()
 
     def tarjeta(e):
-        es_correctivo = e["tipo"] in ("Correctivo", "Correctivo verificado")
-
-        if e["tipo"] == "Preventivo":
-            color = AZUL
-            fondo = "#DBEAFE"
-        elif es_correctivo:
-            color = NARANJA
-            fondo = "#FEF3C7"
-        else:
-            color = "#6D28D9"
-            fondo = "#EDE9FE"
-
-        subtitulo = (
-            e.get("hallazgo")
-            if es_correctivo and e.get("hallazgo")
-            else e.get("trabajo")
-        ) or "Sin descripción"
+        color = NARANJA
+        fondo = "#FEF3C7"
+        subtitulo = e.get("observaciones") or "Sin descripción del trabajo"
 
         return ft.Container(
             content=ft.Column(
@@ -352,27 +278,15 @@ def vista_bitacora(page: ft.Page):
                         [
                             ft.Row(
                                 [
-                                    ft.Icon(
-                                        ft.Icons.CALENDAR_MONTH_OUTLINED,
-                                        size=15,
-                                        color=SECUNDARIO,
-                                    ),
-                                    ft.Text(
-                                        _fecha_texto(e["fecha"]),
-                                        size=11,
-                                        color=SECUNDARIO,
-                                    ),
+                                    ft.Icon(ft.Icons.CALENDAR_MONTH_OUTLINED, size=15, color=SECUNDARIO),
+                                    ft.Text(_fecha_texto(e["fecha"]), size=11, color=SECUNDARIO),
                                 ],
                                 spacing=4,
                                 tight=True,
                             ),
                             ft.Row(
                                 [
-                                    ft.Icon(
-                                        ft.Icons.PERSON_OUTLINE,
-                                        size=15,
-                                        color=SECUNDARIO,
-                                    ),
+                                    ft.Icon(ft.Icons.PERSON_OUTLINE, size=15, color=SECUNDARIO),
                                     ft.Text(
                                         e.get("responsable") or "Sin responsable",
                                         size=11,
@@ -413,28 +327,27 @@ def vista_bitacora(page: ft.Page):
 
     def actualizar(_=None):
         texto = (buscar.value or "").strip().casefold()
-        tipo = filtro_tipo.value or "Todos"
+        estado = filtro_estado.value or "Todos"
         maquina = filtro_maquina.value or "Todas"
 
         visibles = []
         for e in estado_datos["eventos"]:
-            if tipo != "Todos" and e["tipo"] != tipo:
+            if estado != "Todos" and e["estado"] != estado:
                 continue
 
             if maquina != "Todas" and str(e["id_maquina"]) != maquina:
                 continue
 
-            bolsa = " ".join(
-                [
-                    e.get("codigo_maquina") or "",
-                    e.get("maquina") or "",
-                    e.get("trabajo") or "",
-                    e.get("responsable") or "",
-                    e.get("verificador") or "",
-                    e.get("hallazgo") or "",
-                    e.get("codigo_revision") or "",
-                ]
-            ).casefold()
+            bolsa = " ".join([
+                e.get("codigo_maquina") or "",
+                e.get("maquina") or "",
+                e.get("trabajo") or "",
+                e.get("observaciones") or "",
+                e.get("responsable") or "",
+                e.get("verificador") or "",
+                e.get("hallazgo") or "",
+                e.get("codigo_revision") or "",
+            ]).casefold()
 
             if texto and texto not in bolsa:
                 continue
@@ -463,16 +376,14 @@ def vista_bitacora(page: ft.Page):
                 ft.Container(
                     content=ft.Column(
                         [
-                            ft.Icon(
-                                ft.Icons.HISTORY_OUTLINED, size=42, color="#9CA3AF"
-                            ),
+                            ft.Icon(ft.Icons.HISTORY_OUTLINED, size=42, color="#9CA3AF"),
                             ft.Text(
                                 "Sin registros de mantenimiento",
                                 color=TEXTO,
                                 weight=ft.FontWeight.BOLD,
                             ),
                             ft.Text(
-                                "Las revisiones realizadas y los correctivos verificados aparecerán aquí.",
+                                "Aquí aparecerán las acciones correctivas cuando el técnico registre el trabajo realizado.",
                                 size=12,
                                 color=SECUNDARIO,
                                 text_align=ft.TextAlign.CENTER,
@@ -512,7 +423,7 @@ def vista_bitacora(page: ft.Page):
         actualizar()
 
     buscar.on_change = actualizar
-    filtro_tipo.on_change = actualizar
+    filtro_estado.on_change = actualizar
     filtro_maquina.on_change = actualizar
 
     cuerpo = ft.Column(
@@ -528,7 +439,7 @@ def vista_bitacora(page: ft.Page):
                                 color=TEXTO,
                             ),
                             ft.Text(
-                                "Historial consolidado de mantenimientos preventivos y correctivos.",
+                                "Trabajos correctivos realizados.",
                                 size=12,
                                 color=SECUNDARIO,
                             ),
@@ -546,7 +457,7 @@ def vista_bitacora(page: ft.Page):
                 vertical_alignment=ft.CrossAxisAlignment.START,
             ),
             buscar,
-            ft.Row([filtro_maquina, filtro_tipo], spacing=8),
+            ft.Row([filtro_maquina, filtro_estado], spacing=8),
             resumen,
             lista,
         ],

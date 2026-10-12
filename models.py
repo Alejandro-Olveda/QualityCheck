@@ -21,6 +21,7 @@ class Usuario(Base):
     id_usuario = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(100), nullable=False)
     correo = Column(String(150), unique=True, nullable=False, index=True)
+    nombre_usuario = Column(String(100), nullable=False)
     contrasena_hash = Column(String(255), nullable=False)
     activo = Column(Boolean, default=True)
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
@@ -119,6 +120,7 @@ class CriterioInspeccion(Base):
     categoria = Column(String(100), nullable=False)
     nombre_criterio = Column(String(150), nullable=False)
 
+    # Se conserva "description" porque el backend actual usa c.description.
     description = Column(Text)
     activo = Column(Boolean, default=True)
 
@@ -152,12 +154,14 @@ class Inspeccion(Base):
     resultado_final = Column(String(50))
     observaciones_generales = Column(String(500))
 
+    # Estado actual de la revisión sin perder el resultado histórico original.
     estado_revision = Column(
         String(30),
         nullable=False,
         default="Abierta",
     )
 
+    # Si esta revisión es una correctiva, apunta a la revisión que originó el problema.
     id_revision_origen = Column(
         Integer,
         ForeignKey("revisiones.id_inspeccion"),
@@ -219,17 +223,21 @@ class AccionCorrectiva(Base):
     )
 
     descripcion_accion = Column(String(500), nullable=False)
+
+    # Se conserva por compatibilidad/historial con registros anteriores.
     responsable = Column(String(150), nullable=False)
 
     fecha_compromiso = Column(DateTime, nullable=False)
     completada = Column(Boolean, default=False)
 
+    # Técnico asignado actualmente.
     id_responsable = Column(
         Integer,
         ForeignKey("usuarios.id_usuario"),
         nullable=True,
     )
 
+    # Inspector/Admin que hizo la asignación.
     id_asignado_por = Column(
         Integer,
         ForeignKey("usuarios.id_usuario"),
@@ -245,7 +253,7 @@ class AccionCorrectiva(Base):
     fecha_realizada = Column(DateTime)
     observaciones_tecnico = Column(Text)
 
-
+    # Inspector/Admin que verificó el trabajo.
     id_verificador = Column(
         Integer,
         ForeignKey("usuarios.id_usuario"),
@@ -318,6 +326,7 @@ class RevisionProgramada(Base):
     )
     observaciones = Column(Text)
 
+    # Se llena cuando la preventiva programada ya produjo una revisión real.
     id_inspeccion = Column(
         Integer,
         ForeignKey("revisiones.id_inspeccion"),

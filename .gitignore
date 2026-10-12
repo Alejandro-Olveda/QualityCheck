@@ -1,4 +1,6 @@
-.venv/
-__pycache__/
-*.pyc
 .env
+.venv/
+build/
+**/build/
+*.apk
+__pycache__/

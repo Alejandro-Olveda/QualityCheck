@@ -3,6 +3,8 @@ import estilos
 
 
 def aplicar_tema(page):
+    # Fuerza tema claro para que menús desplegables, diálogos y campos
+    # no hereden texto claro del tema del sistema operativo.
     page.theme_mode = ft.ThemeMode.LIGHT
     page.theme = ft.Theme(
         color_scheme=ft.ColorScheme(
@@ -62,20 +64,34 @@ def crear_menu_mas(page=None):
             page.session.store.remove(clave)
         page.go("/")
 
+    def abrir_seccion(ruta):
+        def navegar(e):
+            menu.visible = False
+            page.go(ruta)
+        return navegar
+
     controles = [
         ft.ListTile(
             leading=ft.Icon(ft.Icons.HISTORY_OUTLINED, color="#4B5563"),
             title=ft.Text("Bitácora de mantenimiento", color="#374151"),
-            on_click=(lambda e: page.go("/bitacora")) if page else None,
+            on_click=abrir_seccion("/bitacora") if page else None,
         )
     ]
+
+    controles.append(
+        ft.ListTile(
+            leading=ft.Icon(ft.Icons.HISTORY, color="#4B5563"),
+            title=ft.Text("Historial de revisiones", color="#374151"),
+            on_click=abrir_seccion("/historial") if page else None,
+        )
+    )
 
     if rol == "Administrador":
         controles.append(
             ft.ListTile(
                 leading=ft.Icon(ft.Icons.MANAGE_ACCOUNTS_OUTLINED, color="#4B5563"),
                 title=ft.Text("Usuarios y roles", color="#374151"),
-                on_click=(lambda e: page.go("/usuarios")) if page else None,
+                on_click=abrir_seccion("/usuarios") if page else None,
             )
         )
 
@@ -83,10 +99,12 @@ def crear_menu_mas(page=None):
         ft.ListTile(
             leading=ft.Icon(ft.Icons.PERSON_OUTLINE, color="#4B5563"),
             title=ft.Text("Perfil", color="#374151"),
+            on_click=abrir_seccion("/perfil") if page else None,
         ),
         ft.ListTile(
             leading=ft.Icon(ft.Icons.SETTINGS_OUTLINED, color="#4B5563"),
             title=ft.Text("Configuración", color="#374151"),
+            on_click=abrir_seccion("/configuracion") if page else None,
         ),
         ft.ListTile(
             leading=ft.Icon(ft.Icons.LOGOUT, color="#B91C1C"),
@@ -95,7 +113,7 @@ def crear_menu_mas(page=None):
         ),
     ])
 
-    return ft.Container(
+    menu = ft.Container(
         content=ft.Column(controles, tight=True),
         width=230,
         bgcolor="#FFFFFF",
@@ -103,6 +121,7 @@ def crear_menu_mas(page=None):
         border_radius=15,
         visible=False,
     )
+    return menu
 
 
 def crear_destinos_navbar(pequeno=False):
