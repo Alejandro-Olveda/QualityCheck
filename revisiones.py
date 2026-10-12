@@ -626,19 +626,31 @@ def vista_revisiones(page: ft.Page):
         async def guardar_pdf(e):
             try:
                 contenido = construir_pdf(r, detalle)
-                destino = await selector_pdf.save_file(
-                    dialog_title='Guardar reporte PDF', file_name=r['codigo'] + '.pdf',
-                    file_type=ft.FilePickerFileType.CUSTOM, allowed_extensions=['pdf'],
-                    src_bytes=contenido if page.web else None,
-                )
                 if page.web:
-                    aviso('Se envió el archivo PDF al navegador.')
-                elif destino:
-                    ruta = Path(destino)
-                    if ruta.suffix.lower() != '.pdf':
-                        ruta = Path(str(ruta) + '.pdf')
-                    ruta.write_bytes(contenido)
-                    aviso('PDF guardado en ' + str(ruta))
+                    # Un enlace aleatorio de 2 min: el servidor ofrece un PDF real con Content-Disposition.
+                    # Este paso lo intercepta GeckoView mediante onExternalResponse.
+                    from descarga_pdf_segura import crear_descarga
+                    token = crear_descarga(contenido, r['codigo'] + '.pdf')
+                    import os
+                    base = os.environ.get('QC_PUBLIC_BASE_URL', 'https://qualitycheck-e4nz.onrender.com').rstrip('/')
+                    enlace = base + '/qc-download/' + token
+                    # Navegación dentro de la misma ventana, sin abrir el navegador externo.
+                    launcher = ft.UrlLauncher()
+                    page.services.append(launcher)
+                    page.update()
+                    await launcher.launch_url(enlace, web_only_window_name='_self')
+                else:
+                    destino = await selector_pdf.save_file(
+                        dialog_title='Guardar reporte PDF', file_name=r['codigo'] + '.pdf',
+                        file_type=ft.FilePickerFileType.CUSTOM, allowed_extensions=['pdf'],
+                        src_bytes=contenido,
+                    )
+                    if destino:
+                        ruta = Path(destino)
+                        if ruta.suffix.lower() != '.pdf':
+                            ruta = Path(str(ruta) + '.pdf')
+                        ruta.write_bytes(contenido)
+                        aviso('PDF guardado en ' + str(ruta))
             except ImportError:
                 aviso('Instala reportlab: python -m pip install reportlab')
             except Exception as exc:

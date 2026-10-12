@@ -181,7 +181,7 @@ def main(page: ft.Page):
     txt_titulo = ft.Text("Inicia sesión", size=20, weight=ft.FontWeight.BOLD, color="#25252B", width=320)
     txt_usuario = ft.TextField(
         label="USUARIO O CORREO",
-        hint_text="Ingrese su usuario o correo electrónico",
+        hint_text="Ej. Alejandro Olveda",
         hint_style=ft.TextStyle(size=12, color="#6B7280"),
         border_color="#BDBDBD",
         focused_border_color="#F5A000",
@@ -278,4 +278,6 @@ def main(page: ft.Page):
         cambiar_ruta(None)
 
 
-ft.run(main, assets_dir="assets")
+# Mantenemos ejecución local original; Render utiliza servidor_pdf.py
+if __name__ == "__main__":
+    ft.run(main, assets_dir="assets")
