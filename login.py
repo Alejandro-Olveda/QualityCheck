@@ -181,7 +181,7 @@ def main(page: ft.Page):
     txt_titulo = ft.Text("Inicia sesión", size=20, weight=ft.FontWeight.BOLD, color="#25252B", width=320)
     txt_usuario = ft.TextField(
         label="USUARIO O CORREO",
-        hint_text="Ej. Alejandro Olveda",
+        hint_text="Ingresa usuario o correo electrónico",
         hint_style=ft.TextStyle(size=12, color="#6B7280"),
         border_color="#BDBDBD",
         focused_border_color="#F5A000",

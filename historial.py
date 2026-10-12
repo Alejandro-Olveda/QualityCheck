@@ -58,7 +58,7 @@ def vista_historial(page: ft.Page):
         cuerpo.controls.clear()
         cuerpo.controls.extend([
             ft.Text('Historial de revisiones', size=22, weight=ft.FontWeight.BOLD, color=TEXTO),
-            ft.Text('Consulta las inspecciones anteriores, sus criterios y los hallazgos.', size=12, color=GRIS),
+            ft.Text('Consulta las inspecciones anteriores, sus criterios y los hallazgos. La Bitácora conserva la cronología general de mantenimiento.', size=12, color=GRIS),
             busqueda,
             ft.Row([resultado, ft.Button('Actualizar', icon=ft.Icons.REFRESH, on_click=cargar)], spacing=8),
         ])
@@ -201,29 +201,7 @@ def vista_historial(page: ft.Page):
                     ft.Text('Resultado: ' + (corr['resultado_final'] or 'Pendiente'), size=12, color=GRIS),
                 ]))
 
-        async def descargar_pdf(e):
-            try:
-                from revisiones import construir_pdf
-                contenido = construir_pdf(r, info)
-                destino = await selector_pdf.save_file(
-                    dialog_title='Guardar reporte PDF', file_name=r['codigo'] + '.pdf',
-                    file_type=ft.FilePickerFileType.CUSTOM, allowed_extensions=['pdf'],
-                    src_bytes=contenido if page.web else None,
-                )
-                if destino and not page.web:
-                    ruta = Path(destino)
-                    if ruta.suffix.lower() != '.pdf':
-                        ruta = Path(str(ruta) + '.pdf')
-                    ruta.write_bytes(contenido)
-            except Exception as exc:
-                cuerpo.controls.append(ft.Text('No se pudo guardar el PDF: ' + str(exc), color='#B91C1C'))
-                page.update()
 
-        cuerpo.controls.append(ft.Button(
-            content=ft.Text('GUARDAR REPORTE PDF', size=13, weight=ft.FontWeight.BOLD, color=TEXTO),
-            bgcolor=estilos.COLOR_PRINCIPAL, height=46, on_click=descargar_pdf,
-        ))
-        page.update()
 
     busqueda.on_change = listado
     resultado.on_change = listado
