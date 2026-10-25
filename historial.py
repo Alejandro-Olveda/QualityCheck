@@ -89,7 +89,20 @@ def vista_historial(page: ft.Page):
                 ]),
                 ft.Text('Inspector: ' + r['inspector'], size=11, color=GRIS),
                 ft.Text('Tipo: ' + r['tipo'] + ' · Resultado: ' + (r['resultado'] or 'Pendiente'), size=12, color=TEXTO),
-                ft.Button(content=ft.Text('VER REVISIÓN COMPLETA', color=TEXTO, weight=ft.FontWeight.BOLD, size=12), bgcolor=estilos.COLOR_PRINCIPAL, height=43, on_click=lambda e, rev=r: detalle(rev)),
+
+                ft.Button(
+                    content=ft.Text(
+                        "VER REVISIÓN COMPLETA",
+                        color=TEXTO,
+                        weight=ft.FontWeight.BOLD,
+                        size=12
+                    ),
+                    bgcolor=estilos.COLOR_PRINCIPAL,
+                    height=43,
+                    on_click=lambda e, rev=r: page.go(
+                        f"/revisiones/{rev['id']}"
+                    ),
+                ),
             ]))
         page.update()
 

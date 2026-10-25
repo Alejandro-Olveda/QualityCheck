@@ -65,37 +65,102 @@ def obtener_criterios(id_maquina):
 def obtener_revisiones():
     with SessionLocal() as db:
         extras = _estado_extra_revisiones(db)
+
         filas = (
             db.query(Inspeccion)
-            .options(joinedload(Inspeccion.maquina), joinedload(Inspeccion.inspector))
+            .options(
+                joinedload(Inspeccion.maquina),
+                joinedload(Inspeccion.inspector),
+            )
             .order_by(Inspeccion.fecha_inspeccion.desc())
             .all()
         )
+
+        # Obtener el técnico y el estado de la acción correctiva
+        # más reciente de cada hallazgo.
+        seguimientos = db.execute(text("""
+            SELECT
+                h.id_inspeccion,
+                h.id_hallazgo,
+                COALESCE(
+                    tec.nombre,
+                    NULLIF(ac.responsable, '')
+                ) AS tecnico,
+                COALESCE(ac.estado, 'Sin asignar') AS estado_trabajo
+            FROM hallazgos h
+            LEFT JOIN LATERAL (
+                SELECT a.*
+                FROM acciones_correctivas a
+                WHERE a.id_hallazgo = h.id_hallazgo
+                ORDER BY a.id_accion DESC
+                LIMIT 1
+            ) ac ON TRUE
+            LEFT JOIN usuarios tec
+                ON tec.id_usuario = ac.id_responsable
+            ORDER BY h.id_inspeccion, h.id_hallazgo
+        """)).mappings().all()
+
+        tecnicos_por_revision = {}
+
+        for seguimiento in seguimientos:
+            id_revision = int(seguimiento["id_inspeccion"])
+
+            tecnicos_por_revision.setdefault(
+                id_revision, []
+            ).append({
+                "id_hallazgo": seguimiento["id_hallazgo"],
+                "tecnico": seguimiento["tecnico"] or "Sin asignar",
+                "estado_trabajo": (
+                    seguimiento["estado_trabajo"] or "Sin asignar"
+                ),
+            })
+
         salida = []
+
         for i in filas:
             extra = extras.get(i.id_inspeccion, {})
-            estado_revision = extra.get("estado_revision", "Abierta")
+            estado_revision = extra.get(
+                "estado_revision", "Abierta"
+            )
             resultado = i.resultado_final or "Pendiente"
 
+            estado_actual = (
+                "Corregida"
+                if estado_revision == "Corregida"
+                else resultado
+            )
 
-            estado_actual = "Corregida" if estado_revision == "Corregida" else resultado
             salida.append({
                 "id": i.id_inspeccion,
                 "codigo": i.codigo_inspeccion,
-                "maquina": i.maquina.nombre if i.maquina else "Desconocida",
-                "codigo_maquina": i.maquina.codigo_maquina if i.maquina else "—",
+                "maquina": (
+                    i.maquina.nombre
+                    if i.maquina else "Desconocida"
+                ),
+                "codigo_maquina": (
+                    i.maquina.codigo_maquina
+                    if i.maquina else "—"
+                ),
                 "id_maquina": i.id_maquina,
-                "inspector": i.inspector.nombre if i.inspector else "Desconocido",
+                "inspector": (
+                    i.inspector.nombre
+                    if i.inspector else "Desconocido"
+                ),
                 "tipo": i.tipo_inspeccion,
                 "fecha": i.fecha_inspeccion,
                 "resultado": resultado,
                 "estado_revision": estado_revision,
                 "estado_actual": estado_actual,
-                "id_revision_origen": extra.get("id_revision_origen"),
+                "id_revision_origen": extra.get(
+                    "id_revision_origen"
+                ),
                 "observaciones": i.observaciones_generales or "",
+                "tecnicos_trabajo": tecnicos_por_revision.get(
+                    i.id_inspeccion, []
+                ),
             })
-        return salida
 
+        return salida
 
 def obtener_detalle(id_inspeccion):
     with SessionLocal() as db:
@@ -134,6 +199,34 @@ def obtener_detalle(id_inspeccion):
             ORDER BY r.fecha_inspeccion DESC
         """), {"origen": id_inspeccion}).mappings().all()
 
+        responsables_por_hallazgo = {}
+        responsables_mantenimiento = set()
+        filas_responsables = db.execute(text("""
+            SELECT h.id_hallazgo,
+                   COALESCE(
+                       NULLIF(BTRIM(u.nombre), ''),
+                       NULLIF(BTRIM(ac.responsable), '')
+                   ) AS nombre
+            FROM hallazgos h
+            LEFT JOIN acciones_correctivas ac
+                ON ac.id_hallazgo = h.id_hallazgo
+            LEFT JOIN usuarios u
+                ON u.id_usuario = ac.id_responsable
+            WHERE h.id_inspeccion = :id
+            ORDER BY h.id_hallazgo, nombre NULLS LAST
+        """), {"id": id_inspeccion}).mappings().all()
+
+        for fila in filas_responsables:
+            nombre = (fila["nombre"] or "").strip() or "Sin asignar"
+            responsables_por_hallazgo.setdefault(
+                int(fila["id_hallazgo"]), []
+            ).append(nombre)
+            responsables_mantenimiento.add(nombre)
+
+        responsables_mantenimiento = sorted(responsables_mantenimiento)
+        if not responsables_mantenimiento:
+            responsables_mantenimiento = ["Sin asignar"]
+
         return {
             "criterios": criterios,
             "hallazgos": [
@@ -142,9 +235,13 @@ def obtener_detalle(id_inspeccion):
                     "descripcion": h.descripcion,
                     "severidad": h.nivel_severidad,
                     "estado": h.estado,
+                    "tecnicos_mantenimiento": responsables_por_hallazgo.get(
+                        h.id_hallazgo, ["Sin asignar"]
+                    ),
                 }
                 for h in hallazgos
             ],
+            "responsables_mantenimiento": responsables_mantenimiento,
             "correctivas": [dict(c) for c in correctivas],
         }
 
@@ -189,14 +286,6 @@ def guardar_revision(
                 .filter(Maquina.id_maquina == id_maquina, Maquina.activa.is_(True))
                 .first()
             )
-            inspector = (
-                db.query(Usuario)
-                .filter(Usuario.id_usuario == id_inspector, Usuario.activo.is_(True))
-                .first()
-            )
-            if not maquina or not inspector:
-                raise ValueError("Máquina o inspector inexistente/inactivo.")
-
             ids = [e["id_criterio"] for e in evaluaciones]
             if len(ids) != len(set(ids)):
                 raise ValueError("Hay criterios repetidos.")
@@ -222,8 +311,17 @@ def guardar_revision(
                     or programada.id_maquina != id_maquina
                 ):
                     raise ValueError("La programación no existe, ya se realizó o es de otra máquina.")
+                id_inspector = programada.id_responsable
             else:
                 programada = None
+
+            inspector = (
+                db.query(Usuario)
+                .filter(Usuario.id_usuario == id_inspector, Usuario.activo.is_(True))
+                .first()
+            )
+            if not maquina or not inspector:
+                raise ValueError("Máquina o inspector inexistente/inactivo.")
 
             origen = None
             if id_revision_origen is not None:
@@ -370,8 +468,16 @@ def programar_preventiva(id_maquina, id_responsable, fecha, descripcion):
     with SessionLocal() as db:
         if not db.get(Maquina, id_maquina):
             raise ValueError("No existe esa máquina.")
-        if not db.get(Usuario, id_responsable):
-            raise ValueError("No existe ese responsable.")
+        inspector = db.execute(text("""
+            SELECT 1
+            FROM usuarios u
+            JOIN usuario_roles ur ON ur.id_usuario = u.id_usuario
+            JOIN roles r ON r.id_rol = ur.id_rol
+            WHERE u.id_usuario=:id AND u.activo=TRUE
+              AND r.nombre_rol='Inspector'
+        """), {"id": id_responsable}).scalar_one_or_none()
+        if not inspector:
+            raise ValueError("El responsable seleccionado no es un Inspector activo.")
         p = RevisionProgramada(
             id_maquina=id_maquina,
             id_responsable=id_responsable,
@@ -624,6 +730,22 @@ def listar_tecnicos():
             ORDER BY u.nombre
         """)).mappings().all()
         return [{"id": f["id_usuario"], "nombre": f["nombre"], "correo": f["correo"]} for f in filas]
+
+
+def listar_inspectores():
+    with SessionLocal() as db:
+        filas = db.execute(text("""
+            SELECT DISTINCT u.id_usuario, u.nombre, u.correo
+            FROM usuarios u
+            JOIN usuario_roles ur ON ur.id_usuario = u.id_usuario
+            JOIN roles r ON r.id_rol = ur.id_rol
+            WHERE u.activo = TRUE AND r.nombre_rol = 'Inspector'
+            ORDER BY u.nombre
+        """)).mappings().all()
+        return [
+            {"id": f["id_usuario"], "nombre": f["nombre"], "correo": f["correo"]}
+            for f in filas
+        ]
 
 
 def _requiere_rol(id_usuario, permitidos):
