@@ -106,3 +106,11 @@ def logout(authorization: str | None = Header(default=None)):
         with _lock:
             _sessions.pop(authorization[7:], None)
     return {"ok": True}
+
+# Rutas Android adicionales
+from api_movil_extensiones import instalar_rutas
+instalar_rutas(app, sesion_actual)
+
+# QualityCheck Android Fase 3
+from api_movil_fase3 import instalar_rutas_fase3
+instalar_rutas_fase3(app, sesion_actual)

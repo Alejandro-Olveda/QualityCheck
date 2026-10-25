@@ -8,8 +8,8 @@ from revision_backend import (
     listar_programadas,
     listar_hallazgos_y_acciones,
     listar_usuarios_roles,
+    obtener_revisiones,
 )
-
 
 TEXTO = "#25252B"
 SECUNDARIO = "#5F6670"
@@ -94,6 +94,34 @@ def vista_dashboard(page: ft.Page):
             on_click=lambda e: page.go(ruta),
         )
 
+    def abrir_resultado_preventiva(p):
+        try:
+            revisiones = obtener_revisiones()
+            revision = None
+
+            id_inspeccion = p.get("id_inspeccion")
+
+            if id_inspeccion is not None:
+                revision = next(
+                    (r for r in revisiones if str(r["id"]) == str(id_inspeccion)),
+                    None,
+                )
+
+            if revision is None:
+                revision = next(
+                    (r for r in revisiones if str(r["id_maquina"]) == str(p["id_maquina"])),
+                    None,
+                )
+
+            if revision:
+                page.go(f"/revisiones/resultado/{revision['id']}")
+            else:
+                page.go("/revisiones")
+
+        except Exception as exc:
+            print(f"Error abriendo resultado de inspección: {exc}")
+            page.go("/revisiones")
+
     def tarjeta_programada(p):
         color_estado = ROJO if p["estado"] == "Vencida" else NARANJA_OSCURO
         return ft.Container(
@@ -142,7 +170,7 @@ def vista_dashboard(page: ft.Page):
             border=ft.Border.all(1, BORDE),
             border_radius=12,
             padding=11,
-            on_click=lambda e: page.go("/revisiones"),
+            on_click=lambda e: abrir_resultado_preventiva(p),
         )
 
     def tarjeta_trabajo(x):

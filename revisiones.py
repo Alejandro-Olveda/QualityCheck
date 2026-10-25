@@ -1,6 +1,5 @@
-"""Pantalla real de revisiones para QualityCheck (Flet). Renombrar a revisiones.py."""
 from io import BytesIO
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from sqlalchemy import text
 from database import SessionLocal
@@ -12,7 +11,7 @@ from componentes import aplicar_tema, crear_header, crear_menu_mas, configurar_n
 from revision_backend import (
     obtener_maquinas, obtener_criterios, obtener_revisiones, obtener_detalle,
     guardar_revision, listar_programadas, programar_preventiva,
-    cancelar_programada, reprogramar_preventiva,
+    cancelar_programada, reprogramar_preventiva, listar_inspectores,
 )
 
 BORDE = '#E1E3E6'
@@ -21,7 +20,6 @@ GRIS = '#6B7280'
 VERDE = '#15803D'
 ROJO = '#B91C1C'
 AMARILLO = '#B45309'
-
 
 
 def construir_pdf(revision, detalle):
@@ -47,6 +45,9 @@ def construir_pdf(revision, detalle):
         ('Revisión', revision['codigo']), ('Máquina', revision['codigo_maquina'] + ' · ' + revision['maquina']),
         ('Inspector', revision['inspector']), ('Tipo', revision['tipo']),
         ('Fecha', fecha), ('Resultado', revision['resultado']),
+        ('Técnico', ', '.join(
+            detalle.get('responsables_mantenimiento') or ['Sin asignar']
+        )),
         ('Observaciones', revision['observaciones'] or 'Sin observaciones')
     ]:
         story.append(p(f'{etiqueta}: {valor}'))
@@ -69,6 +70,10 @@ def construir_pdf(revision, detalle):
     story.append(p('Hallazgos registrados: ' + str(len(detalle['hallazgos']))))
     for h in detalle['hallazgos']:
         story.append(p(f"• {h['descripcion']} ({h['severidad']}; {h['estado']})"))
+        story.append(p(
+            'Técnico: '
+            + ', '.join(h.get('tecnicos_mantenimiento') or ['Sin asignar'])
+        ))
 
     # Seguimiento real del hallazgo: se muestra aun cuando la corrección está pendiente.
     with SessionLocal() as db:
@@ -115,7 +120,7 @@ def construir_pdf(revision, detalle):
     return salida.getvalue()
 
 
-def vista_revisiones(page: ft.Page):
+def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
     if not page.session.store.get('usuario_id'):
         page.go('/')
         return
@@ -128,6 +133,16 @@ def vista_revisiones(page: ft.Page):
     selector_pdf = ft.FilePicker()
     page.services.append(selector_pdf)
     body = ft.Column(expand=True, scroll=ft.ScrollMode.AUTO, spacing=12, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+    id_revision_ruta = None
+
+    partes_ruta = page.route.rstrip("/").split("/")
+
+    if (
+        len(partes_ruta) == 3
+        and partes_ruta[1] == "revisiones"
+        and partes_ruta[2].isdigit()
+    ):
+        id_revision_ruta = int(partes_ruta[2])
 
     def aviso(mensaje):
         page.show_dialog(ft.SnackBar(content=ft.Text(str(mensaje))))
@@ -239,63 +254,206 @@ def vista_revisiones(page: ft.Page):
         control.color = estilos.COLOR_TEXTO
         return control
 
+    mostrar_historial_completo = False
+
+    def cambiar_historial(e=None):
+        nonlocal mostrar_historial_completo
+        mostrar_historial_completo = not mostrar_historial_completo
+        listado()
+
+
     def listado():
         body.controls.clear()
-        body.controls.extend([
-            ft.Row([
-                ft.Column([
-                    texto('Revisiones técnicas', 20, True),
-                    texto('Consulta inspecciones realizadas y registra nuevas revisiones.', 12, color=GRIS),
-                ], spacing=2, expand=True),
-                ft.IconButton(icon=ft.Icons.REFRESH, icon_color=estilos.COLOR_TEXTO, tooltip='Actualizar', on_click=lambda e: listado()),
-            ], vertical_alignment=ft.CrossAxisAlignment.START),
-            boton_primario('＋  NUEVA REVISIÓN', lambda e: nueva_revision()),
-            boton_secundario('PROGRAMAR / VER PREVENTIVAS', lambda e: preventivas()),
-            ft.Divider(height=8, color=BORDE),
-        ])
+
+        body.controls.extend(
+            [
+                ft.Row(
+                    [
+                        ft.Column(
+                            [
+                                texto("Revisiones técnicas", 20, True),
+                                texto(
+                                    "Consulta inspecciones realizadas y registra nuevas revisiones.",
+                                    12,
+                                    color=GRIS,
+                                ),
+                            ],
+                            spacing=2,
+                            expand=True,
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.REFRESH,
+                            icon_color=estilos.COLOR_TEXTO,
+                            tooltip="Actualizar",
+                            on_click=lambda e: listado(),
+                        ),
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
+                boton_primario("＋  NUEVA REVISIÓN", lambda e: nueva_revision()),
+                boton_secundario("PROGRAMAR / VER PREVENTIVAS", lambda e: preventivas()),
+                ft.Divider(height=8, color=BORDE),
+            ]
+        )
+
         try:
             registros = obtener_revisiones()
-            body.controls.append(texto(f'{len(registros)} revisión(es) registrada(s)', 12, color=GRIS))
-            for r in registros:
-                fecha = r['fecha'].strftime('%d/%m/%Y') if r['fecha'] else 'Sin fecha'
-                body.controls.append(card([
-                    ft.Row([
-                        ft.Column([
-                            texto(r['codigo_maquina'] + ' · ' + r['maquina'], 14, True),
-                            texto(r['codigo'], 11, color=GRIS),
-                        ], spacing=2, expand=True),
-                        etiqueta_estado(r['resultado']),
-                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                    ft.Divider(height=1, color=BORDE),
-                    ft.Row([
-                        ft.Icon(ft.Icons.BUILD_OUTLINED, size=16, color=GRIS),
-                        texto(r['tipo'], 11, color=GRIS),
-                        ft.Icon(ft.Icons.CALENDAR_MONTH_OUTLINED, size=16, color=GRIS),
-                        texto(fecha, 11, color=GRIS),
-                    ], spacing=6),
-                    ft.Row([
-                        ft.Icon(ft.Icons.PERSON_OUTLINE, size=16, color=GRIS),
-                        texto(r['inspector'], 11, color=GRIS, expand=True),
-                        texto('Ver detalle  ›', 11, True, estilos.COLOR_PRINCIPAL),
-                    ], spacing=6),
-                ], on_click=lambda e, rev=r: ver_detalle(rev)))
-            if not registros:
+            aprobadas_ocultas = [
+                r for r in registros
+                if r.get("resultado") == "Aprobada"
+                and r.get("estado_revision") != "Corregida"
+            ]
+            ids_aprobadas_ocultas = {
+                r.get("id") for r in aprobadas_ocultas
+            }
+            registros_visibles = (
+                registros
+                if mostrar_historial_completo
+                else [
+                    r for r in registros
+                    if r.get("id") not in ids_aprobadas_ocultas
+                ]
+            )
+
+            body.controls.append(
+                texto(
+                    f"{len(registros_visibles)} revisión(es) visible(s) "
+                    f"de {len(registros)} registrada(s)",
+                    12,
+                    color=GRIS,
+                )
+            )
+            if aprobadas_ocultas:
                 body.controls.append(
-                    ft.Container(
-                        content=ft.Column([
-                            ft.Icon(ft.Icons.ASSIGNMENT_OUTLINED, size=44, color='#9CA3AF'),
-                            texto('Aún no hay revisiones', 15, True),
-                            texto('Registra la primera revisión para comenzar el historial.', 12, color=GRIS, text_align=ft.TextAlign.CENTER),
-                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=8),
-                        bgcolor=BLANCO,
-                        border=ft.Border.all(1, BORDE),
-                        border_radius=12,
-                        padding=28,
-                        alignment=ft.Alignment.CENTER,
+                    boton_secundario(
+                        (
+                            "OCULTAR APROBADAS"
+                            if mostrar_historial_completo
+                            else f"VER HISTORIAL COMPLETO ({len(registros)} revisiones)"
+                        ),
+                        cambiar_historial,
                     )
                 )
+
+            for r in registros_visibles:
+                fecha = r["fecha"].strftime("%d/%m/%Y") if r.get("fecha") else "Sin fecha"
+
+                contenido_revision = [
+                    # Máquina y resultado de la inspección
+                    ft.Row(
+                        [
+                            ft.Column(
+                                [
+                                    texto(
+                                        r["codigo_maquina"] + " · " + r["maquina"], 14, True
+                                    ),
+                                    texto(r["codigo"], 11, color=GRIS),
+                                ],
+                                spacing=2,
+                                expand=True,
+                            ),
+                            etiqueta_estado(r["resultado"]),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    ft.Divider(height=1, color=BORDE),
+                    # Tipo de revisión y fecha
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.BUILD_OUTLINED, size=16, color=GRIS),
+                            texto(r["tipo"], 11, color=GRIS),
+                            ft.Icon(ft.Icons.CALENDAR_MONTH_OUTLINED, size=16, color=GRIS),
+                            texto(fecha, 11, color=GRIS),
+                        ],
+                        spacing=6,
+                    ),
+                    # Inspector que realizó la revisión
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.PERSON_OUTLINE, size=16, color=GRIS),
+                            texto(
+                                "Inspector: " + str(r.get("inspector") or "Sin asignar"),
+                                11,
+                                color=GRIS,
+                                expand=True,
+                            ),
+                            texto("Ver detalle  ›", 11, True, estilos.COLOR_PRINCIPAL),
+                        ],
+                        spacing=6,
+                    ),
+                ]
+
+                # Información del resultado y del trabajo correctivo
+                if (
+                    r.get("resultado") == "Aprobada"
+                    and r.get("estado_revision") != "Corregida"
+                ):
+                    contenido_revision.append(
+                        texto(
+                            "Aprobada desde el inicio · Sin hallazgos "
+                            "ni corrección requerida",
+                            11,
+                            True,
+                            VERDE,
+                        )
+                    )
+                else:
+                    if r.get("estado_revision") == "Corregida":
+                        contenido_revision.append(
+                            texto("Corregida mediante hallazgos", 11, True, VERDE)
+                        )
+
+                    contenido_revision.append(
+                        texto(
+                            "Técnico responsable y estado del trabajo", 11, True, AMARILLO
+                        )
+                    )
+
+                    tecnicos = r.get("tecnicos_trabajo") or [
+                        {
+                            "tecnico": "Sin asignar",
+                            "estado_trabajo": "Sin asignar",
+                        }
+                    ]
+
+                    for t in tecnicos:
+                        contenido_revision.append(
+                            ft.Row(
+                                [
+                                    ft.Icon(ft.Icons.PERSON_OUTLINE, size=15, color=GRIS),
+                                    texto(
+                                        str(t.get("tecnico") or "Sin asignar"),
+                                        11,
+                                        True,
+                                        expand=True,
+                                    ),
+                                    etiqueta_estado(
+                                        t.get("estado_trabajo") or "Sin asignar"
+                                    ),
+                                ],
+                                spacing=6,
+                            )
+                        )
+
+                body.controls.append(
+                    card(contenido_revision, on_click=lambda e, rev=r: ver_detalle(rev))
+                )
+
+            if not registros:
+                body.controls.append(
+                    card(
+                        [
+                            ft.Icon(ft.Icons.INVENTORY_2_OUTLINED, size=32, color=GRIS),
+                            texto("No hay revisiones registradas.", 14, True),
+                        ]
+                    )
+                )
+
         except Exception as exc:
-            body.controls.append(texto('Error al consultar revisiones: ' + str(exc), color=ROJO))
+            body.controls.append(
+                texto("Error al consultar revisiones: " + str(exc), color=ROJO)
+            )
+
         page.update()
 
     def nueva_revision(maquina_inicial=None, id_programacion=None):
@@ -390,7 +548,6 @@ def vista_revisiones(page: ft.Page):
         cargar_criterios()
         page.update()
 
-
     def preventivas():
         body.controls.clear()
         body.controls.extend(encabezado_seccion(
@@ -463,6 +620,26 @@ def vista_revisiones(page: ft.Page):
         opciones = [ft.DropdownOption(key=str(m['id']), text=f"{m['codigo']} · {m['nombre']}") for m in maquinas]
         maquina = estilizar_campo(ft.Dropdown(label='Máquina', options=opciones,
                               value=str(programa['id_maquina'] if programa else maquinas[0]['id']), disabled=bool(programa)))
+        inspector = None
+        if programa is None:
+            try:
+                inspectores = listar_inspectores()
+            except Exception as exc:
+                body.controls.append(texto('Error al cargar inspectores: ' + str(exc), color='#B91C1C'))
+                page.update()
+                return
+            if not inspectores:
+                body.controls.append(texto('Primero registra un Inspector activo para asignar la preventiva.', color='#B45309'))
+                page.update()
+                return
+            inspector = estilizar_campo(ft.Dropdown(
+                label='Inspector asignado *',
+                options=[
+                    ft.DropdownOption(key=str(i['id']), text=i['nombre'])
+                    for i in inspectores
+                ],
+                value=str(inspectores[0]['id']),
+            ))
         fecha = estilizar_campo(
             ft.TextField(
                 label='Fecha programada *',
@@ -511,8 +688,12 @@ def vista_revisiones(page: ft.Page):
                     reprogramar_preventiva(programa['id'], dia, descripcion.value)
                     mensaje = 'Preventiva reprogramada.'
                 else:
-                    programar_preventiva(int(maquina.value), int(page.session.store.get('usuario_id')),
-                                       dia, descripcion.value)
+                    programar_preventiva(
+                        int(maquina.value),
+                        int(inspector.value),
+                        dia,
+                        descripcion.value,
+                    )
                     mensaje = 'Preventiva programada.'
                 preventivas()
                 aviso(mensaje)
@@ -521,17 +702,29 @@ def vista_revisiones(page: ft.Page):
             except Exception as exc:
                 aviso('No se pudo guardar: ' + str(exc))
 
-        body.controls.extend([maquina, selector_fecha, descripcion,
+        controles = [maquina]
+        if inspector is not None:
+            controles.append(inspector)
+        controles.extend([selector_fecha, descripcion,
                               boton_primario('GUARDAR PREVENTIVA', guardar)])
+        body.controls.extend(controles)
         page.update()
+
+    def volver_a_lista(e=None):
+        if page.route != "/revisiones":
+            page.go("/revisiones")
+        else:
+            listado()
 
     def ver_detalle(r):
         body.controls.clear()
-        body.controls.extend(encabezado_seccion(
-            'Resultado de inspección',
-            'Consulta el resultado guardado y los criterios evaluados.',
-            volver=lambda e: listado(),
-        ))
+        body.controls.extend(
+            encabezado_seccion(
+                "Resultado de inspección",
+                "Consulta el resultado guardado y los criterios evaluados.",
+                volver=volver_a_lista,
+            )
+        )
         try:
             detalle = obtener_detalle(r['id'])
         except Exception as exc:
@@ -553,6 +746,14 @@ def vista_revisiones(page: ft.Page):
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             ft.Divider(height=1, color=BORDE),
             ft.Row([ft.Icon(ft.Icons.PERSON_OUTLINE, size=17, color=GRIS), texto('Inspector: ' + r['inspector'], 12)], spacing=6),
+            ft.Row([
+                ft.Icon(ft.Icons.HANDYMAN_OUTLINED, size=17, color=GRIS),
+                texto(
+                    'Técnico: '
+                    + ', '.join(detalle['responsables_mantenimiento']),
+                    12,
+                ),
+            ], spacing=6),
             ft.Row([ft.Icon(ft.Icons.BUILD_OUTLINED, size=17, color=GRIS), texto('Tipo: ' + r['tipo'], 12)], spacing=6),
             texto('Observaciones: ' + (r['observaciones'] or 'Sin observaciones'), 12, color=GRIS),
         ]))
@@ -621,6 +822,12 @@ def vista_revisiones(page: ft.Page):
                         texto(h['descripcion'], 12, True, expand=True),
                     ], spacing=8),
                     texto(h['severidad'] + ' · ' + h['estado'], 11, color=GRIS),
+                    texto(
+                        'Técnico: '
+                        + ', '.join(h.get('tecnicos_mantenimiento') or ['Sin asignar']),
+                        11,
+                        color=GRIS,
+                    ),
                 ]))
 
         async def guardar_pdf(e):
@@ -660,4 +867,22 @@ def vista_revisiones(page: ft.Page):
         page.update()
 
     montar()
-    listado()
+
+    if id_inspeccion_inicial is not None:
+        try:
+            registros = obtener_revisiones()
+            revision = next(
+                (r for r in registros if str(r["id"]) == str(id_inspeccion_inicial)),
+                None,
+            )
+
+            if revision:
+                ver_detalle(revision)
+            else:
+                listado()
+                aviso("No se encontró el resultado de esa inspección.")
+        except Exception as exc:
+            listado()
+            aviso("No se pudo abrir el resultado: " + str(exc))
+    else:
+        listado()

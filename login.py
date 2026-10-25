@@ -77,8 +77,18 @@ def main(page: ft.Page):
             else:
                 codigo_maquina = page.route.rsplit("/", 1)[-1]
                 vista_editar_maquina(page, codigo_maquina)
+        elif page.route.startswith("/revisiones/resultado/"):
+            try:
+                id_inspeccion = int(page.route.rsplit("/", 1)[-1])
+                vista_revisiones(page, id_inspeccion_inicial=id_inspeccion)
+            except ValueError:
+                page.go("/revisiones")
         elif page.route == "/revisiones" or page.route.startswith("/revisiones/"):
-            vista_revisiones(page)
+            id_inspeccion = page.route.rsplit("/", 1)[-1]
+            vista_revisiones(
+                page,
+                int(id_inspeccion) if id_inspeccion.isdigit() else None,
+            )
         elif page.route == "/hallazgos":
             vista_hallazgos(page)
         elif page.route == "/usuarios":
