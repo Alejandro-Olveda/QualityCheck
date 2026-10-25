@@ -1,4 +1,6 @@
 import flet as ft
+import base64
+from pathlib import Path
 import estilos
 
 
@@ -28,12 +30,21 @@ def aplicar_tema(page):
     )
 
 
+def _logo_base64():
+    """Carga la imagen de assets dentro de Flet sin depender de la ruta web."""
+    ruta = Path(__file__).resolve().parent / "assets" / "logo.png"
+    try:
+        return base64.b64encode(ruta.read_bytes()).decode("ascii")
+    except OSError:
+        return None
+
+
 def crear_header(titulo=None):
     return ft.Container(
         content=ft.Row(
             [
                 ft.Container(
-                    content=ft.Image(src="logo.png", width=44, height=44, fit=ft.BoxFit.CONTAIN),
+                    content=ft.Image(src=_logo_base64(), width=44, height=44, fit=ft.BoxFit.CONTAIN),
                     width=44,
                     height=44,
                     bgcolor="#FFFFFF",
