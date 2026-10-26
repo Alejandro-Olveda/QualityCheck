@@ -123,6 +123,8 @@ def obtener_revisiones():
                 "estado_revision", "Abierta"
             )
             resultado = i.resultado_final or "Pendiente"
+            if estado_revision == "Corregida":
+                resultado = "Aprobada"
 
             estado_actual = (
                 "Corregida"
@@ -270,6 +272,7 @@ def guardar_revision(
     evaluaciones,
     id_programacion=None,
     id_revision_origen=None,
+    id_usuario_ejecutor=None,
 ):
 
     if not evaluaciones:
@@ -311,6 +314,14 @@ def guardar_revision(
                     or programada.id_maquina != id_maquina
                 ):
                     raise ValueError("La programación no existe, ya se realizó o es de otra máquina.")
+                if (
+                    id_usuario_ejecutor is not None
+                    and obtener_rol_usuario(id_usuario_ejecutor) != "Administrador"
+                    and programada.id_responsable != id_usuario_ejecutor
+                ):
+                    raise PermissionError(
+                        "Esta revisión preventiva está asignada a otro Inspector."
+                    )
                 id_inspector = programada.id_responsable
             else:
                 programada = None
@@ -391,7 +402,8 @@ def guardar_revision(
                 )
                 db.execute(text("""
                     UPDATE revisiones
-                    SET estado_revision='Corregida'
+                    SET estado_revision='Corregida',
+                        resultado_final='Aprobada'
                     WHERE id_inspeccion=:id
                 """), {"id": origen.id_inspeccion})
 
@@ -404,7 +416,7 @@ def guardar_revision(
             raise
 
 
-def listar_programadas(solo_activas=True):
+def listar_programadas(solo_activas=True, id_responsable=None):
 
     with SessionLocal() as db:
         consulta = (
@@ -414,6 +426,10 @@ def listar_programadas(solo_activas=True):
         )
         if solo_activas:
             consulta = consulta.filter(RevisionProgramada.estado == "Programada")
+        if id_responsable is not None:
+            consulta = consulta.filter(
+                RevisionProgramada.id_responsable == id_responsable
+            )
         filas = consulta.order_by(RevisionProgramada.fecha_programada.asc()).all()
 
         salida = []
@@ -427,6 +443,7 @@ def listar_programadas(solo_activas=True):
                 "maquina": m.nombre,
                 "codigo_maquina": m.codigo_maquina,
                 "responsable": u.nombre,
+                "responsable_id": u.id_usuario,
                 "fecha": p.fecha_programada,
                 "descripcion": p.descripcion,
                 "observaciones": p.observaciones or "",
@@ -460,7 +477,15 @@ def listar_historial_programadas():
         } for p, m, u in filas]
 
 
-def programar_preventiva(id_maquina, id_responsable, fecha, descripcion):
+def programar_preventiva(
+    id_maquina,
+    id_responsable,
+    fecha,
+    descripcion,
+    id_programador=None,
+):
+    if id_programador is not None:
+        _requiere_rol(id_programador, ("Inspector", "Administrador"))
     if not (descripcion or "").strip():
         raise ValueError("Agrega una descripción.")
     if fecha < date.today():
@@ -774,6 +799,7 @@ def listar_hallazgos_y_acciones(id_usuario, rol_usuario):
                    h.estado AS estado_hallazgo,
                    rev.id_inspeccion,
                    rev.codigo_inspeccion AS codigo_revision,
+                   rev.fecha_inspeccion AS fecha_revision,
                    m.id_maquina,
                    m.codigo_maquina,
                    m.nombre AS maquina,
@@ -838,6 +864,57 @@ def asignar_hallazgo(id_hallazgo, id_tecnico, id_asignador, descripcion_accion, 
                 "asig": id_asignador,
             })
             h.estado = "En proceso"
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+
+def cambiar_tecnico_hallazgo(id_accion, id_tecnico, id_asignador):
+    _requiere_rol(id_asignador, ("Inspector", "Administrador"))
+    with SessionLocal() as db:
+        try:
+            fila = db.execute(text("""
+                SELECT ac.id_hallazgo, ac.estado, h.estado AS estado_hallazgo
+                FROM acciones_correctivas ac
+                JOIN hallazgos h ON h.id_hallazgo = ac.id_hallazgo
+                WHERE ac.id_accion=:a
+            """), {"a": id_accion}).mappings().first()
+            if not fila:
+                raise ValueError("La acción correctiva no existe.")
+            if fila["estado"] not in ("Asignada", "En proceso", "Requiere ajuste"):
+                raise ValueError(
+                    "No puedes cambiar el técnico después de enviar el trabajo a verificación."
+                )
+            tecnico = db.execute(text("""
+                SELECT u.nombre
+                FROM usuarios u
+                JOIN usuario_roles ur ON ur.id_usuario=u.id_usuario
+                JOIN roles r ON r.id_rol=ur.id_rol
+                WHERE u.id_usuario=:u AND u.activo=TRUE
+                  AND r.nombre_rol='Técnico'
+            """), {"u": id_tecnico}).mappings().first()
+            if not tecnico:
+                raise ValueError("El responsable seleccionado no es un Técnico activo.")
+            db.execute(text("""
+                UPDATE acciones_correctivas
+                SET id_responsable=:tec,
+                    responsable=:nombre,
+                    id_asignado_por=:asig,
+                    estado='Asignada',
+                    completada=FALSE
+                WHERE id_accion=:a
+            """), {
+                "tec": id_tecnico,
+                "nombre": tecnico["nombre"][:150],
+                "asig": id_asignador,
+                "a": id_accion,
+            })
+            db.execute(text("""
+                UPDATE hallazgos
+                SET estado='En proceso'
+                WHERE id_hallazgo=:h
+            """), {"h": fila["id_hallazgo"]})
             db.commit()
         except Exception:
             db.rollback()
@@ -912,7 +989,9 @@ def verificar_trabajo(id_accion, id_inspector, aprobado, observaciones=""):
                 """), {"r": fila["id_inspeccion"]}).scalar_one()
                 if abiertos == 0:
                     db.execute(text("""
-                        UPDATE revisiones SET estado_revision='Corregida'
+                        UPDATE revisiones
+                        SET estado_revision='Corregida',
+                            resultado_final='Aprobada'
                         WHERE id_inspeccion=:r
                     """), {"r": fila["id_inspeccion"]})
             else:

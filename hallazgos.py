@@ -6,6 +6,7 @@ import estilos
 from componentes import aplicar_tema, crear_header, crear_menu_mas, configurar_navbar
 from revision_backend import (
     asignar_hallazgo,
+    cambiar_tecnico_hallazgo,
     listar_hallazgos_y_acciones,
     listar_tecnicos,
     registrar_trabajo_tecnico,
@@ -87,8 +88,15 @@ def vista_hallazgos(page: ft.Page):
             for x in filas:
                 acciones = []
                 if rol in ("Inspector", "Administrador"):
-                    if not x.get("id_accion") or x.get("estado_accion") in (None, "Requiere ajuste"):
+                    if not x.get("id_accion"):
                         acciones.append(boton("Asignar técnico", lambda e, h=x: dialogo_asignar(h), True))
+                    elif x.get("estado_accion") in ("Asignada", "En proceso", "Requiere ajuste"):
+                        acciones.append(
+                            boton(
+                                "Cambiar técnico",
+                                lambda e, h=x: dialogo_asignar(h, cambiar=True),
+                            )
+                        )
                     elif x.get("estado_accion") == "Pendiente de verificación":
                         acciones.append(boton("Verificar", lambda e, a=x: dialogo_verificar(a), True))
                 elif rol == "Técnico" and x.get("estado_accion") in ("Asignada", "En proceso", "Requiere ajuste"):
@@ -104,7 +112,14 @@ def vista_hallazgos(page: ft.Page):
                             etiqueta(x.get("estado_accion") or x.get("estado_hallazgo")),
                         ]),
                         ft.Text(x["descripcion_hallazgo"], size=12),
-                        ft.Text("Severidad: " + x["severidad"], size=11, color=estilos.COLOR_TEXTO_SECUNDARIO),
+                        *([
+                            ft.Text(
+                                "Fecha compromiso: "
+                                + x["fecha_compromiso"].strftime("%d/%m/%Y"),
+                                size=11,
+                                color=estilos.COLOR_TEXTO_SECUNDARIO,
+                            )
+                        ] if x.get("fecha_compromiso") else []),
                         *([ft.Text("Técnico: " + x["tecnico"], size=11, color=estilos.COLOR_TEXTO_SECUNDARIO)] if x.get("tecnico") else []),
                         *([ft.Text("Trabajo: " + x["descripcion_accion"], size=11, color=estilos.COLOR_TEXTO_SECUNDARIO)] if x.get("descripcion_accion") else []),
                         *([ft.Row(acciones, spacing=8, wrap=True)] if acciones else []),
@@ -118,7 +133,7 @@ def vista_hallazgos(page: ft.Page):
             cuerpo.controls.append(ft.Text("Error: " + str(exc), color="#B91C1C"))
         page.update()
 
-    def dialogo_asignar(h):
+    def dialogo_asignar(h, cambiar=False):
         tecnicos = listar_tecnicos()
         if not tecnicos:
             aviso("No hay usuarios con rol Técnico.")
@@ -134,14 +149,18 @@ def vista_hallazgos(page: ft.Page):
         )
         descripcion = ft.TextField(
             label="Trabajo a realizar *",
+            value=h.get("descripcion_accion") or "",
             multiline=True,
             min_lines=2,
+            read_only=cambiar,
             bgcolor="#FFFFFF",
             color=estilos.COLOR_TEXTO,
             border_color="#A3A8B1",
             focused_border_color=estilos.COLOR_PRINCIPAL,
         )
         fecha_inicial = datetime.now().date() + timedelta(days=2)
+        if cambiar and h.get("fecha_compromiso"):
+            fecha_inicial = h["fecha_compromiso"].date()
 
         fecha = ft.TextField(
             label="Fecha compromiso *",
@@ -192,7 +211,7 @@ def vista_hallazgos(page: ft.Page):
 
         d = ft.AlertDialog(
             title=ft.Text(
-                "Asignar correctiva",
+                "Cambiar técnico" if cambiar else "Asignar correctiva",
                 color=estilos.COLOR_TEXTO,
                 weight=ft.FontWeight.BOLD,
             ),
@@ -214,15 +233,22 @@ def vista_hallazgos(page: ft.Page):
                     fecha_seleccionada["valor"],
                     datetime.min.time(),
                 )
-                asignar_hallazgo(
-                    h["id_hallazgo"],
-                    int(tecnico.value),
-                    int(usuario_id),
-                    descripcion.value,
-                    fecha_compromiso,
-                )
+                if cambiar:
+                    cambiar_tecnico_hallazgo(
+                        h["id_accion"],
+                        int(tecnico.value),
+                        int(usuario_id),
+                    )
+                else:
+                    asignar_hallazgo(
+                        h["id_hallazgo"],
+                        int(tecnico.value),
+                        int(usuario_id),
+                        descripcion.value,
+                        fecha_compromiso,
+                    )
                 cerrar(None)
-                aviso("Trabajo asignado.")
+                aviso("Técnico cambiado." if cambiar else "Trabajo asignado.")
                 actualizar()
             except Exception as exc:
                 aviso("No se pudo asignar: " + str(exc))
