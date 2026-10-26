@@ -83,6 +83,8 @@ def main(page: ft.Page):
                 vista_revisiones(page, id_inspeccion_inicial=id_inspeccion)
             except ValueError:
                 page.go("/revisiones")
+        elif page.route == "/revisiones/programadas":
+            vista_revisiones(page, mostrar_preventivas=True)
         elif page.route == "/revisiones" or page.route.startswith("/revisiones/"):
             id_inspeccion = page.route.rsplit("/", 1)[-1]
             vista_revisiones(

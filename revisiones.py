@@ -120,7 +120,11 @@ def construir_pdf(revision, detalle):
     return salida.getvalue()
 
 
-def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
+def vista_revisiones(
+    page: ft.Page,
+    id_inspeccion_inicial=None,
+    mostrar_preventivas=False,
+):
     if not page.session.store.get('usuario_id'):
         page.go('/')
         return
@@ -130,6 +134,8 @@ def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
     page.floating_action_button = None
     aplicar_tema(page)
     menu_mas = crear_menu_mas(page)
+    rol_usuario = page.session.store.get("usuario_rol") or "Sin rol"
+    usuario_id = page.session.store.get("usuario_id")
     selector_pdf = ft.FilePicker()
     page.services.append(selector_pdf)
     body = ft.Column(expand=True, scroll=ft.ScrollMode.AUTO, spacing=12, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
@@ -290,29 +296,30 @@ def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
-                boton_primario("＋  NUEVA REVISIÓN", lambda e: nueva_revision()),
-                boton_secundario("PROGRAMAR / VER PREVENTIVAS", lambda e: preventivas()),
+                *(
+                    [
+                        boton_primario("＋  NUEVA REVISIÓN", lambda e: nueva_revision()),
+                        boton_secundario("PROGRAMAR / VER PREVENTIVAS", lambda e: preventivas()),
+                    ]
+                    if rol_usuario != "Técnico"
+                    else [
+                        boton_secundario("VER PREVENTIVAS", lambda e: preventivas()),
+                    ]
+                ),
                 ft.Divider(height=8, color=BORDE),
             ]
         )
 
         try:
             registros = obtener_revisiones()
-            aprobadas_ocultas = [
+            revisiones_pendientes = [
                 r for r in registros
-                if r.get("resultado") == "Aprobada"
+                if r.get("resultado") == "Requiere atención"
                 and r.get("estado_revision") != "Corregida"
             ]
-            ids_aprobadas_ocultas = {
-                r.get("id") for r in aprobadas_ocultas
-            }
+            registros_ocultos = len(registros) - len(revisiones_pendientes)
             registros_visibles = (
-                registros
-                if mostrar_historial_completo
-                else [
-                    r for r in registros
-                    if r.get("id") not in ids_aprobadas_ocultas
-                ]
+                registros if mostrar_historial_completo else revisiones_pendientes
             )
 
             body.controls.append(
@@ -323,13 +330,13 @@ def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
                     color=GRIS,
                 )
             )
-            if aprobadas_ocultas:
+            if registros_ocultos:
                 body.controls.append(
                     boton_secundario(
                         (
-                            "OCULTAR APROBADAS"
+                            "OCULTAR HISTORIAL"
                             if mostrar_historial_completo
-                            else f"VER HISTORIAL COMPLETO ({len(registros)} revisiones)"
+                            else f"VER HISTORIAL COMPLETO ({registros_ocultos} ocultas)"
                         ),
                         cambiar_historial,
                     )
@@ -457,6 +464,9 @@ def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
         page.update()
 
     def nueva_revision(maquina_inicial=None, id_programacion=None):
+        if rol_usuario == "Técnico":
+            aviso("El rol Técnico no puede registrar revisiones.")
+            return
         body.controls.clear()
         body.controls.extend(encabezado_seccion(
             'Nueva revisión',
@@ -525,7 +535,8 @@ def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
                 codigo = guardar_revision(int(selector_maquina.value),
                                          int(page.session.store.get('usuario_id')),
                                          selector_tipo.value, observaciones.value, datos,
-                                         id_programacion=id_programacion)
+                                         id_programacion=id_programacion,
+                                         id_usuario_ejecutor=int(usuario_id))
             except Exception as exc:
                 aviso('No se pudo guardar: ' + str(exc))
                 return
@@ -556,15 +567,33 @@ def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
             volver=lambda e: listado(),
             texto_volver='Volver a inspecciones',
         ))
-        body.controls.append(boton_primario('＋  PROGRAMAR PREVENTIVA', lambda e: formulario_preventiva()))
+        if rol_usuario != "Técnico":
+            body.controls.append(
+                boton_primario(
+                    '＋  PROGRAMAR PREVENTIVA',
+                    lambda e: formulario_preventiva(),
+                )
+            )
         try:
             programas = listar_programadas()
             body.controls.append(texto(f'{len(programas)} revisión(es) preventiva(s)', 12, color=GRIS))
             for p in programas:
                 acciones = []
-                if p['estado'] in ('Programada', 'Vencida'):
+                puede_realizar = (
+                    rol_usuario == "Administrador"
+                    or str(p["responsable_id"]) == str(usuario_id)
+                )
+                if p['estado'] in ('Programada', 'Vencida') and puede_realizar:
+                    acciones.append(
+                        boton_primario(
+                            'REALIZAR REVISIÓN',
+                            lambda e, p=p: nueva_revision(
+                                p['id_maquina'], p['id']
+                            ),
+                        )
+                    )
+                if p['estado'] in ('Programada', 'Vencida') and rol_usuario != "Técnico":
                     acciones.extend([
-                        boton_primario('REALIZAR REVISIÓN', lambda e, p=p: nueva_revision(p['id_maquina'], p['id'])),
                         boton_texto('Reprogramar', lambda e, p=p: formulario_preventiva(p), estilos.COLOR_TEXTO, ft.Icons.EDIT_CALENDAR_OUTLINED),
                         boton_texto('Cancelar', lambda e, p=p: cancelar_preventiva(p), ROJO, ft.Icons.CANCEL_OUTLINED),
                     ])
@@ -693,6 +722,7 @@ def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
                         int(inspector.value),
                         dia,
                         descripcion.value,
+                        id_programador=int(usuario_id),
                     )
                     mensaje = 'Preventiva programada.'
                 preventivas()
@@ -713,6 +743,8 @@ def vista_revisiones(page: ft.Page, id_inspeccion_inicial=None):
     def volver_a_lista(e=None):
         if page.route != "/revisiones":
             page.go("/revisiones")
+        elif mostrar_preventivas:
+            preventivas()
         else:
             listado()
 

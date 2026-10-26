@@ -1,3 +1,5 @@
+from datetime import date
+
 import flet as ft
 import estilos
 
@@ -94,34 +96,6 @@ def vista_dashboard(page: ft.Page):
             on_click=lambda e: page.go(ruta),
         )
 
-    def abrir_resultado_preventiva(p):
-        try:
-            revisiones = obtener_revisiones()
-            revision = None
-
-            id_inspeccion = p.get("id_inspeccion")
-
-            if id_inspeccion is not None:
-                revision = next(
-                    (r for r in revisiones if str(r["id"]) == str(id_inspeccion)),
-                    None,
-                )
-
-            if revision is None:
-                revision = next(
-                    (r for r in revisiones if str(r["id_maquina"]) == str(p["id_maquina"])),
-                    None,
-                )
-
-            if revision:
-                page.go(f"/revisiones/resultado/{revision['id']}")
-            else:
-                page.go("/revisiones")
-
-        except Exception as exc:
-            print(f"Error abriendo resultado de inspección: {exc}")
-            page.go("/revisiones")
-
     def tarjeta_programada(p):
         color_estado = ROJO if p["estado"] == "Vencida" else NARANJA_OSCURO
         return ft.Container(
@@ -141,6 +115,11 @@ def vista_dashboard(page: ft.Page):
                                 color=SECUNDARIO,
                                 max_lines=1,
                                 overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Text(
+                                "Inspector: " + str(p.get("responsable") or "Sin asignar"),
+                                size=10,
+                                color=SECUNDARIO,
                             ),
                         ],
                         spacing=2,
@@ -170,11 +149,20 @@ def vista_dashboard(page: ft.Page):
             border=ft.Border.all(1, BORDE),
             border_radius=12,
             padding=11,
-            on_click=lambda e: abrir_resultado_preventiva(p),
+            on_click=lambda e: page.go("/revisiones/programadas"),
         )
 
     def tarjeta_trabajo(x):
-        estado = x.get("estado_accion") or x.get("estado_hallazgo") or "Pendiente"
+        estado = x.get("estado_accion") or x.get("estado_hallazgo") or "Sin asignar"
+        fecha_compromiso = x.get("fecha_compromiso")
+        if hasattr(fecha_compromiso, "date"):
+            fecha_compromiso = fecha_compromiso.date()
+        if (
+            fecha_compromiso
+            and fecha_compromiso < date.today()
+            and estado not in ("Cerrado", "Verificada")
+        ):
+            estado = "Vencida"
         return ft.Container(
             content=ft.Column(
                 [
@@ -202,6 +190,29 @@ def vista_dashboard(page: ft.Page):
                         max_lines=2,
                         overflow=ft.TextOverflow.ELLIPSIS,
                     ),
+                    ft.Text(
+                        "Revisión: "
+                        + (
+                            x["fecha_revision"].strftime("%d/%m/%Y")
+                            if x.get("fecha_revision")
+                            else "Sin fecha"
+                        ),
+                        size=10,
+                        color=SECUNDARIO,
+                    ),
+                    ft.Text(
+                        "Técnico: " + str(x.get("tecnico") or "Sin asignar"),
+                        size=10,
+                        color=SECUNDARIO,
+                    ),
+                    *([
+                        ft.Text(
+                            "Compromiso: "
+                            + x["fecha_compromiso"].strftime("%d/%m/%Y"),
+                            size=10,
+                            color=SECUNDARIO,
+                        )
+                    ] if x.get("fecha_compromiso") else []),
                 ],
                 spacing=5,
             ),
@@ -209,7 +220,9 @@ def vista_dashboard(page: ft.Page):
             border=ft.Border.all(1, BORDE),
             border_radius=12,
             padding=11,
-            on_click=lambda e: page.go("/hallazgos"),
+            on_click=lambda e: page.go(
+                f"/revisiones/resultado/{x['id_inspeccion']}"
+            ),
         )
 
     cuerpo = ft.Column(
@@ -332,7 +345,12 @@ def vista_dashboard(page: ft.Page):
             with SessionLocal() as db:
                 resumen = obtener_resumen_dashboard(db)
 
-            programadas = listar_programadas()
+            if rol == "Inspector":
+                programadas = listar_programadas(
+                    id_responsable=int(usuario_id)
+                )
+            else:
+                programadas = listar_programadas()
             vencidas = sum(1 for p in programadas if p["estado"] == "Vencida")
             pendientes_h = listar_hallazgos_y_acciones(int(usuario_id), rol)
 
@@ -419,6 +437,18 @@ def vista_dashboard(page: ft.Page):
                         ),
                     ]
                 )
+                if pendientes_h:
+                    cuerpo.controls.append(
+                        ft.Text(
+                            "Revisiones con hallazgos",
+                            size=16,
+                            weight=ft.FontWeight.BOLD,
+                            color=TEXTO,
+                        )
+                    )
+                    cuerpo.controls.extend(
+                        tarjeta_trabajo(x) for x in pendientes_h[:5]
+                    )
             else:
                 cuerpo.controls.extend(
                     [

@@ -46,6 +46,7 @@ def vista_listado(page: ft.Page):
         page.go("/")
         return
 
+    rol = page.session.store.get("usuario_rol") or "Sin rol"
     aplicar_tema(page)
 
     header = crear_header(titulo="Máquinas")
@@ -395,15 +396,16 @@ def vista_listado(page: ft.Page):
         on_click=lambda e: page.go("/agregar_maquina"),
     )
 
+    encabezado_maquinas = [resumen]
+    if rol != "Técnico":
+        encabezado_maquinas.append(btn_agregar)
+
     cuerpo = ft.Column(
         [
             txt_buscar,
             contenedor_filtros,
             ft.Row(
-                [
-                    resumen,
-                    btn_agregar,
-                ],
+                encabezado_maquinas,
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
