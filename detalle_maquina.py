@@ -106,7 +106,6 @@ def vista_detalle_maquina(page: ft.Page, codigo_maquina: str):
                         "id": h.id_hallazgo,
                         "descripcion": h.descripcion,
                         "estado": h.estado,
-                        "severidad": h.nivel_severidad,
                     }
                     for h in hallazgos
                 ],
@@ -366,7 +365,6 @@ def vista_detalle_maquina(page: ft.Page, codigo_maquina: str):
                                 ft.Text(h["estado"], size=10, color="#B45309"),
                             ]
                         ),
-                        ft.Text(f"Severidad: {h['severidad']}", size=11, color="#5F6670"),
                     ],
                     spacing=3,
                 ),

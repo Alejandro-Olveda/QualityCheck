@@ -197,7 +197,6 @@ class Hallazgo(Base):
         ForeignKey("criterios_inspeccion.id_criterio"),
         nullable=False,
     )
-    nivel_severidad = Column(String(50), nullable=False)
     descripcion = Column(String(500), nullable=False)
     estado = Column(String(50), default="Abierto")
 

@@ -50,7 +50,7 @@ def obtener_alertas(id_usuario, rol, dias_anticipacion=7):
 
         filtro = 'AND ac.id_responsable = :usuario' if rol == 'Técnico' else ''
         hallazgos = db.execute(text(f"""
-            SELECT h.id_hallazgo, h.descripcion, h.nivel_severidad, h.estado AS estado_hallazgo,
+            SELECT h.id_hallazgo, h.descripcion, h.estado AS estado_hallazgo,
                    m.codigo_maquina, m.nombre AS maquina,
                    ac.id_accion, ac.estado AS estado_accion, ac.fecha_compromiso
             FROM hallazgos h
@@ -76,16 +76,13 @@ def obtener_alertas(id_usuario, rol, dias_anticipacion=7):
             if rol in ('Administrador', 'Inspector') and estado == 'Pendiente de verificación':
                 tipo, prioridad, detalle = 'Pendiente de verificación', 0, 'El inspector debe validar el trabajo'
             elif rol in ('Administrador', 'Inspector') and not h['id_accion']:
-                tipo, prioridad, detalle = 'Hallazgo sin asignar', 0 if str(h['nivel_severidad']).lower() in ('alta', 'crítica', 'critica') else 1, 'Asignar un técnico'
+                tipo, prioridad, detalle = 'Hallazgo sin asignar', 0, 'Asignar un técnico'
             elif rol == 'Técnico' and estado == 'Requiere ajuste':
                 tipo, prioridad, detalle = 'Corrección requiere ajuste', 0, 'Revisar las observaciones del inspector'
             elif estado not in ('Verificada', 'Pendiente de verificación') and dias is not None and dias < 0:
                 tipo, prioridad, detalle = 'Correctiva vencida', 0, f'Vencida hace {-dias} día(s)'
             elif estado not in ('Verificada', 'Pendiente de verificación') and dias is not None and dias <= dias_anticipacion:
                 tipo, prioridad, detalle = 'Correctiva próxima', 1, 'Vence hoy' if dias == 0 else f'Faltan {dias} día(s)'
-            elif rol in ('Administrador', 'Inspector') and str(h['nivel_severidad']).lower() in ('alta', 'crítica', 'critica'):
-                tipo, prioridad, detalle = 'Hallazgo de severidad alta', 1, 'Requiere seguimiento'
-
             if tipo:
                 avisos.append({
                     'tipo': tipo,

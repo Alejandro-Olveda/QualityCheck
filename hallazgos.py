@@ -28,6 +28,7 @@ def vista_hallazgos(page: ft.Page):
     aplicar_tema(page)
     menu_mas = crear_menu_mas(page)
     cuerpo = ft.Column(expand=True, scroll=ft.ScrollMode.AUTO, spacing=10)
+    estado_seleccionado = {"valor": "Todos"}
 
     def aviso(mensaje):
         sb = ft.SnackBar(content=ft.Text(str(mensaje), color="#FFFFFF"), bgcolor="#25252B")
@@ -60,6 +61,73 @@ def vista_hallazgos(page: ft.Page):
             on_click=fn,
         )
 
+    filtros_por_rol = {
+        "Técnico": [
+            ("Todos", "Todos"),
+            ("En proceso", "En proceso"),
+            ("Requiere ajuste", "Requieren ajuste"),
+            ("Pendiente de verificación", "Por verificar"),
+        ],
+        "Inspector": [
+            ("Todos", "Todos"),
+            ("Sin asignar", "Sin asignar"),
+            ("En proceso", "En proceso"),
+            ("Requiere ajuste", "Requieren ajuste"),
+            ("Pendiente de verificación", "Por verificar"),
+        ],
+        "Administrador": [
+            ("Todos", "Todos"),
+            ("Sin asignar", "Sin asignar"),
+            ("En proceso", "En proceso"),
+            ("Requiere ajuste", "Requieren ajuste"),
+            ("Pendiente de verificación", "Por verificar"),
+        ],
+    }
+    filtros_estado = filtros_por_rol.get(rol, [("Todos", "Todos")])
+    contenedor_filtros = ft.Row(spacing=6, wrap=True)
+
+    def construir_filtro(valor, texto):
+        seleccionado = estado_seleccionado["valor"] == valor
+        return ft.Container(
+            content=ft.Text(
+                texto,
+                size=11,
+                weight=ft.FontWeight.BOLD,
+                color=estilos.COLOR_TEXTO,
+            ),
+            bgcolor=estilos.COLOR_PRINCIPAL if seleccionado else "#FFFFFF",
+            border=ft.Border.all(
+                1,
+                estilos.COLOR_PRINCIPAL if seleccionado else "#D1D5DB",
+            ),
+            border_radius=18,
+            padding=ft.Padding.symmetric(horizontal=11, vertical=7),
+            on_click=lambda e, v=valor: seleccionar_filtro(v),
+        )
+
+    def renderizar_filtros():
+        contenedor_filtros.controls = [
+            construir_filtro(valor, texto)
+            for valor, texto in filtros_estado
+        ]
+
+    def seleccionar_filtro(valor):
+        estado_seleccionado["valor"] = valor
+        actualizar()
+
+    def coincide_filtro(fila):
+        filtro = estado_seleccionado["valor"]
+        if filtro == "Todos":
+            return True
+        if filtro == "Sin asignar":
+            return not fila.get("id_accion")
+        if filtro == "En proceso":
+            return (fila.get("estado_accion") or fila.get("estado_hallazgo")) in (
+                "Asignada",
+                "En proceso",
+            )
+        return (fila.get("estado_accion") or fila.get("estado_hallazgo")) == filtro
+
     def actualizar(e=None):
         cuerpo.controls.clear()
         subtitulo = {
@@ -71,13 +139,19 @@ def vista_hallazgos(page: ft.Page):
             ft.Text("Hallazgos y correctivas", size=21, weight=ft.FontWeight.BOLD, color=estilos.COLOR_TEXTO),
             ft.Text(subtitulo, size=12, color=estilos.COLOR_TEXTO_SECUNDARIO),
         ])
+        renderizar_filtros()
+        cuerpo.controls.append(contenedor_filtros)
         try:
             filas = listar_hallazgos_y_acciones(usuario_id, rol)
+            filas = [x for x in filas if coincide_filtro(x)]
             if not filas:
                 cuerpo.controls.append(ft.Container(
                     content=ft.Column([
                         ft.Icon(ft.Icons.TASK_ALT, size=42, color="#9CA3AF"),
-                        ft.Text("No hay trabajos pendientes", weight=ft.FontWeight.BOLD),
+                        ft.Text(
+                            "No hay hallazgos con este estado",
+                            weight=ft.FontWeight.BOLD,
+                        ),
                     ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
                     bgcolor="#FFFFFF",
                     border=ft.Border.all(1, "#E1E3E6"),

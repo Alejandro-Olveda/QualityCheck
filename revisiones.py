@@ -70,7 +70,7 @@ def construir_pdf(revision, detalle):
     story.append(Spacer(1, 12))
     story.append(p('Hallazgos registrados: ' + str(len(detalle['hallazgos']))))
     for h in detalle['hallazgos']:
-        story.append(p(f"• {h['descripcion']} ({h['severidad']}; {h['estado']})"))
+        story.append(p(f"• {h['descripcion']} ({h['estado']})"))
         story.append(p(
             'Técnico: '
             + ', '.join(h.get('tecnicos_mantenimiento') or ['Sin asignar'])
@@ -79,7 +79,7 @@ def construir_pdf(revision, detalle):
     # Seguimiento real del hallazgo: se muestra aun cuando la corrección está pendiente.
     with SessionLocal() as db:
         acciones = db.execute(text("""
-            SELECT h.descripcion AS hallazgo, h.nivel_severidad AS severidad,
+            SELECT h.descripcion AS hallazgo,
                    ac.descripcion_accion, ac.estado, ac.fecha_compromiso,
                    ac.fecha_realizada, ac.fecha_verificacion,
                    ac.observaciones_tecnico, ac.observaciones_verificacion,
@@ -904,7 +904,7 @@ def vista_revisiones(
                         ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color=AMARILLO, size=20),
                         texto(h['descripcion'], 12, True, expand=True),
                     ], spacing=8),
-                    texto(h['severidad'] + ' · ' + h['estado'], 11, color=GRIS),
+                    texto(h['estado'], 11, color=GRIS),
                     texto(
                         'Técnico: '
                         + ', '.join(h.get('tecnicos_mantenimiento') or ['Sin asignar']),
