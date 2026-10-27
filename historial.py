@@ -204,7 +204,7 @@ def vista_historial(page: ft.Page):
                 cuerpo.controls.append(card([
                     ft.Row([ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color='#B45309', size=20),
                             ft.Text(h['descripcion'], size=12, weight=ft.FontWeight.BOLD, color=TEXTO, expand=True)], spacing=8),
-                    ft.Text(h['severidad'] + ' · ' + h['estado'], size=11, color=GRIS),
+                    ft.Text(h['estado'], size=11, color=GRIS),
                 ]))
         if info.get('correctivas'):
             cuerpo.controls.append(ft.Text('Revisiones correctivas relacionadas', size=16, weight=ft.FontWeight.BOLD, color=TEXTO))

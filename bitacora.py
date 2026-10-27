@@ -47,7 +47,6 @@ def obtener_bitacora():
                 ac.estado AS estado,
                 rev.codigo_inspeccion AS codigo_revision,
                 h.descripcion AS hallazgo,
-                h.nivel_severidad AS severidad,
                 COALESCE(ac.observaciones_verificacion, '') AS observacion_verificacion
             FROM acciones_correctivas ac
             JOIN hallazgos h ON h.id_hallazgo = ac.id_hallazgo
@@ -164,7 +163,6 @@ def vista_bitacora(page: ft.Page):
 
         filas.extend([
                 ("Hallazgo", e.get("hallazgo") or "—"),
-                ("Severidad", e.get("severidad") or "—"),
                 ("Verificado por", e.get("verificador") or "—"),
         ])
 

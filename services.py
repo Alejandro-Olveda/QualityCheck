@@ -154,8 +154,7 @@ def registrar_inspeccion_completa(db: Session, id_maquina: int, id_inspector: in
             nuevo_hallazgo = Hallazgo(
                 id_inspeccion=nueva_inspeccion.id_inspeccion,
                 id_criterio=item.get("id_criterio"),
-                nivel_severidad=item.get("nivel_severidad", "Media"),
-                descripcion_falla=item.get("descripcion_falla"),
+                descripcion=item.get("descripcion_falla") or "Criterio no cumple",
                 estado="Abierto"
             )
             db.add(nuevo_hallazgo)

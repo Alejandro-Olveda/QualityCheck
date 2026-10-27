@@ -235,7 +235,6 @@ def obtener_detalle(id_inspeccion):
                 {
                     "id": h.id_hallazgo,
                     "descripcion": h.descripcion,
-                    "severidad": h.nivel_severidad,
                     "estado": h.estado,
                     "tecnicos_mantenimiento": responsables_por_hallazgo.get(
                         h.id_hallazgo, ["Sin asignar"]
@@ -441,7 +440,6 @@ def guardar_revision(
                     db.add(Hallazgo(
                         id_inspeccion=nuevo.id_inspeccion,
                         id_criterio=e["id_criterio"],
-                        nivel_severidad="Media",
                         descripcion=(e.get("observacion") or "Criterio no cumple")[:500],
                         estado="Abierto",
                     ))
@@ -855,7 +853,6 @@ def listar_hallazgos_y_acciones(id_usuario, rol_usuario):
         filas = db.execute(text(f"""
             SELECT h.id_hallazgo,
                    h.descripcion AS descripcion_hallazgo,
-                   h.nivel_severidad AS severidad,
                    h.estado AS estado_hallazgo,
                    rev.id_inspeccion,
                    rev.codigo_inspeccion AS codigo_revision,
