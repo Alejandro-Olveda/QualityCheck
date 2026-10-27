@@ -17,7 +17,6 @@ from perfil import vista_perfil
 from database import SessionLocal
 from models import Usuario
 from revision_backend import obtener_rol_usuario
-from recordar_usuario import leer_usuario_recordado, guardar_usuario_recordado, borrar_usuario_recordado
 from sqlalchemy import func
 
 
@@ -83,7 +82,11 @@ def main(page: ft.Page):
                 vista_revisiones(page, id_inspeccion_inicial=id_inspeccion)
             except ValueError:
                 page.go("/revisiones")
-        elif page.route == "/revisiones/programadas":
+        elif page.route in (
+            "/revisiones/preventivas",
+            "/preventivas",
+            "/revisiones/programadas",
+        ):
             vista_revisiones(page, mostrar_preventivas=True)
         elif page.route == "/revisiones" or page.route.startswith("/revisiones/"):
             id_inspeccion = page.route.rsplit("/", 1)[-1]
@@ -119,8 +122,6 @@ def main(page: ft.Page):
             page.go("/dashboard")
 
     lbl_error = ft.Text("", color="#DC2626", size=12, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)
-    usuario_guardado = leer_usuario_recordado()
-
     def iniciar_sesion(e):
         identificador = (txt_usuario.value or "").strip()
         contrasena = txt_password.value or ""
@@ -160,14 +161,6 @@ def main(page: ft.Page):
             page.session.store.set("usuario_nombre", nombre)
             page.session.store.set("usuario_rol", rol)
 
-            try:
-                if checkbox_recordar.value:
-                    guardar_usuario_recordado(identificador)
-                else:
-                    borrar_usuario_recordado()
-            except OSError:
-                pass
-
             txt_password.value = ""
             page.go("/dashboard")
         except Exception:
@@ -201,7 +194,6 @@ def main(page: ft.Page):
         width=320,
         bgcolor="#FFFFFF",
         color="#25252B",
-        value=usuario_guardado,
     )
     txt_password = ft.TextField(
         label="CONTRASEÑA",
@@ -218,19 +210,6 @@ def main(page: ft.Page):
         on_submit=iniciar_sesion,
     )
 
-    def cambiar_recordar(valor):
-        if not valor:
-            borrar_usuario_recordado()
-
-    checkbox_recordar = ft.Checkbox(
-        value=bool(usuario_guardado),
-        active_color="#F5A000",
-        on_change=lambda e: cambiar_recordar(e.control.value),
-    )
-    recordar_usuario = ft.Container(
-        content=ft.Row([checkbox_recordar, ft.Text("Recordar usuario", size=12, color="#616161")], spacing=5),
-        width=320,
-    )
     dialogo_recuperacion = ft.AlertDialog(
         title=ft.Text("Recuperación de contraseña", color="#25252B", weight=ft.FontWeight.BOLD),
         content=ft.Text(
@@ -272,7 +251,6 @@ def main(page: ft.Page):
         txt_password,
         ft.Container(height=4),
         lbl_error,
-        recordar_usuario,
         ft.Container(height=2),
         recuperar_pass,
         ft.Container(height=10),

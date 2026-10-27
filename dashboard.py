@@ -495,7 +495,7 @@ def vista_dashboard(page: ft.Page):
                                     weight=ft.FontWeight.BOLD,
                                     size=11,
                                 ),
-                                on_click=lambda e: page.go("/revisiones"),
+                                on_click=lambda e: page.go("/revisiones/programadas"),
                             ),
                         ]
                     ),
