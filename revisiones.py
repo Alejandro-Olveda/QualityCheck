@@ -12,6 +12,7 @@ from revision_backend import (
     obtener_maquinas, obtener_criterios, obtener_revisiones, obtener_detalle,
     guardar_revision, listar_programadas, programar_preventiva,
     cancelar_programada, reprogramar_preventiva, listar_inspectores,
+    eliminar_revision,
 )
 
 BORDE = '#E1E3E6'
@@ -741,10 +742,10 @@ def vista_revisiones(
         page.update()
 
     def volver_a_lista(e=None):
-        if page.route != "/revisiones":
-            page.go("/revisiones")
-        elif mostrar_preventivas:
+        if mostrar_preventivas:
             preventivas()
+        elif page.route != "/revisiones":
+            page.go("/revisiones")
         else:
             listado()
 
@@ -789,6 +790,56 @@ def vista_revisiones(
             ft.Row([ft.Icon(ft.Icons.BUILD_OUTLINED, size=17, color=GRIS), texto('Tipo: ' + r['tipo'], 12)], spacing=6),
             texto('Observaciones: ' + (r['observaciones'] or 'Sin observaciones'), 12, color=GRIS),
         ]))
+
+        def borrar_revision(e):
+            dialogo = ft.AlertDialog(
+                title=texto("Eliminar revisión", 18, True),
+                content=texto(
+                    "Se eliminarán la revisión, sus resultados, hallazgos y acciones "
+                    "correctivas. Esta acción no se puede deshacer.",
+                    13,
+                    color=GRIS,
+                ),
+                bgcolor=BLANCO,
+            )
+
+            def cerrar(_):
+                dialogo.open = False
+                page.update()
+
+            def confirmar(_):
+                try:
+                    eliminar_revision(
+                        r["id"],
+                        int(page.session.store.get("usuario_id")),
+                    )
+                    cerrar(None)
+                    aviso("Revisión eliminada.")
+                    listado()
+                except Exception as exc:
+                    cerrar(None)
+                    aviso("No se pudo eliminar: " + str(exc))
+
+            dialogo.actions = [
+                ft.TextButton(
+                    content=ft.Text("Cancelar", color=estilos.COLOR_TEXTO),
+                    on_click=cerrar,
+                ),
+                boton_primario("ELIMINAR", confirmar),
+            ]
+            page.overlay.append(dialogo)
+            dialogo.open = True
+            page.update()
+
+        if rol_usuario in ("Administrador", "Inspector"):
+            body.controls.append(
+                boton_texto(
+                    "Eliminar revisión",
+                    borrar_revision,
+                    ROJO,
+                    ft.Icons.DELETE_OUTLINE,
+                )
+            )
 
         body.controls.append(ft.Row([
             ft.Container(
@@ -910,6 +961,8 @@ def vista_revisiones(
 
             if revision:
                 ver_detalle(revision)
+            elif mostrar_preventivas:
+                preventivas()
             else:
                 listado()
                 aviso("No se encontró el resultado de esa inspección.")

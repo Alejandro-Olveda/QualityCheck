@@ -248,6 +248,66 @@ def obtener_detalle(id_inspeccion):
         }
 
 
+def eliminar_revision(id_inspeccion, id_usuario):
+    rol = obtener_rol_usuario(id_usuario)
+    if rol not in ("Administrador", "Inspector"):
+        raise PermissionError(
+            "Solo un Inspector o Administrador puede eliminar revisiones."
+        )
+
+    with SessionLocal() as db:
+        try:
+            revision = db.get(Inspeccion, id_inspeccion)
+            if revision is None:
+                raise ValueError("La revisión no existe.")
+            if rol == "Inspector" and revision.id_inspector != id_usuario:
+                raise PermissionError(
+                    "Solo puedes eliminar revisiones realizadas por tu usuario."
+                )
+
+            estados_no_eliminables = db.execute(text("""
+                SELECT ac.estado
+                FROM acciones_correctivas ac
+                JOIN hallazgos h ON h.id_hallazgo = ac.id_hallazgo
+                WHERE h.id_inspeccion = :id
+                  AND ac.estado IN ('Pendiente de verificación', 'Verificada')
+            """), {"id": id_inspeccion}).scalars().all()
+            if estados_no_eliminables:
+                raise ValueError(
+                    "No se puede eliminar: ya existe trabajo enviado a verificación "
+                    "o verificado."
+                )
+
+            db.execute(text("""
+                UPDATE revisiones
+                SET id_revision_origen = NULL
+                WHERE id_revision_origen = :id
+            """), {"id": id_inspeccion})
+            db.execute(text("""
+                UPDATE revisiones_programadas
+                SET id_inspeccion = NULL, estado = 'Programada'
+                WHERE id_inspeccion = :id
+            """), {"id": id_inspeccion})
+            db.execute(text("""
+                DELETE FROM acciones_correctivas
+                WHERE id_hallazgo IN (
+                    SELECT id_hallazgo FROM hallazgos WHERE id_inspeccion = :id
+                )
+            """), {"id": id_inspeccion})
+            db.execute(text(
+                "DELETE FROM hallazgos WHERE id_inspeccion = :id"
+            ), {"id": id_inspeccion})
+            db.execute(text(
+                "DELETE FROM resultados_inspeccion WHERE id_inspeccion = :id"
+            ), {"id": id_inspeccion})
+            db.delete(revision)
+            _actualizar_estado_maquina(db, revision.id_maquina)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+
 def _actualizar_estado_maquina(db, id_maquina):
 
     abiertos = (
