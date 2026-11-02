@@ -323,6 +323,19 @@ def _actualizar_estado_maquina(db, id_maquina):
         maquina.estado = "En revisión" if abiertos else "Operativa"
 
 
+def obtener_hallazgos_pendientes_maquina(id_maquina):
+    with SessionLocal() as db:
+        return db.execute(text("""
+            SELECT h.id_hallazgo, h.descripcion, h.estado,
+                   r.codigo_inspeccion, r.id_inspeccion
+            FROM hallazgos h
+            JOIN revisiones r ON r.id_inspeccion = h.id_inspeccion
+            WHERE r.id_maquina = :maquina
+              AND h.estado <> 'Cerrado'
+            ORDER BY r.fecha_inspeccion DESC, h.id_hallazgo DESC
+        """), {"maquina": id_maquina}).mappings().all()
+
+
 def guardar_revision(
     id_maquina,
     id_inspector,
@@ -392,6 +405,20 @@ def guardar_revision(
             )
             if not maquina or not inspector:
                 raise ValueError("Máquina o inspector inexistente/inactivo.")
+
+            hallazgos_pendientes = db.execute(text("""
+                SELECT COUNT(*)
+                FROM hallazgos h
+                JOIN revisiones r ON r.id_inspeccion = h.id_inspeccion
+                WHERE r.id_maquina = :maquina
+                  AND h.estado <> 'Cerrado'
+            """), {"maquina": id_maquina}).scalar_one()
+            if hallazgos_pendientes:
+                raise ValueError(
+                    "No se puede crear otra revisión: la máquina tiene hallazgos "
+                    "pendientes de revisiones anteriores. Cierra o elimina la revisión "
+                    "anterior; si no tienes permiso, contacta a un superior."
+                )
 
             origen = None
             if id_revision_origen is not None:

@@ -12,7 +12,7 @@ from revision_backend import (
     obtener_maquinas, obtener_criterios, obtener_revisiones, obtener_detalle,
     guardar_revision, listar_programadas, programar_preventiva,
     cancelar_programada, reprogramar_preventiva, listar_inspectores,
-    eliminar_revision,
+    eliminar_revision, obtener_hallazgos_pendientes_maquina,
 )
 
 BORDE = '#E1E3E6'
@@ -493,6 +493,7 @@ def vista_revisiones(
         observaciones = estilizar_campo(ft.TextField(label='Observaciones generales', multiline=True, min_lines=2, max_lines=4))
         zona_criterios = ft.Column(spacing=10)
         evaluaciones = []
+        revision_bloqueada = {"valor": False}
 
         def cargar_criterios(e=None):
             zona_criterios.controls.clear()
@@ -501,6 +502,26 @@ def vista_revisiones(
                 page.update()
                 return
             try:
+                pendientes = obtener_hallazgos_pendientes_maquina(
+                    int(selector_maquina.value)
+                )
+                if pendientes:
+                    revision_bloqueada["valor"] = True
+                    zona_criterios.controls.append(texto(
+                        'No se puede crear otra revisión para esta máquina: '
+                        'tiene hallazgos pendientes. Cierra o elimina la revisión '
+                        'anterior; si no tienes permiso, contacta a un superior.',
+                        color='#B91C1C',
+                    ))
+                    for pendiente in pendientes:
+                        zona_criterios.controls.append(texto(
+                            f"Hallazgo pendiente ({pendiente['codigo_inspeccion']}): "
+                            f"{pendiente['descripcion']} · Estado: {pendiente['estado']}",
+                            color='#B45309',
+                        ))
+                    page.update()
+                    return
+                revision_bloqueada["valor"] = False
                 criterios = obtener_criterios(int(selector_maquina.value))
                 if not criterios:
                     zona_criterios.controls.append(texto('Esta máquina no tiene criterios activos. Agrégalos desde Máquinas.', color='#B45309'))
@@ -520,6 +541,12 @@ def vista_revisiones(
             page.update()
 
         def guardar(e):
+            if revision_bloqueada["valor"]:
+                aviso(
+                    'No se puede crear la revisión: primero cierra o elimina '
+                    'la revisión anterior.'
+                )
+                return
             if not evaluaciones:
                 aviso('La máquina no tiene criterios para evaluar.')
                 return
